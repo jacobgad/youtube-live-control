@@ -45,13 +45,18 @@ func TestComputeGates(t *testing.T) {
 }
 
 func TestStatusTextWaitingForStreamToStop(t *testing.T) {
-	lagging := youtube.StreamStatus{Status: youtube.StreamActive, Health: youtube.HealthNoData}
-	if got := statusText(broadcast(youtube.LifeLive), lagging, pendingNone); got != "live (waiting for stream to stop)" {
-		t.Fatalf("statusText() = %q", got)
+	for _, health := range []string{"noData", "good", ""} {
+		active := youtube.StreamStatus{Status: youtube.StreamActive, Health: health}
+		if got := statusText(broadcast(youtube.LifeLive), active, pendingNone); got != "live (waiting for stream to stop)" {
+			t.Fatalf("statusText(live, active, %q) = %q", health, got)
+		}
 	}
-	healthy := youtube.StreamStatus{Status: youtube.StreamActive, Health: "good"}
-	if got := statusText(broadcast(youtube.LifeLive), healthy, pendingNone); got != "live" {
-		t.Fatalf("statusText() = %q", got)
+	stopped := youtube.StreamStatus{Status: "inactive"}
+	if got := statusText(broadcast(youtube.LifeLive), stopped, pendingNone); got != "live" {
+		t.Fatalf("statusText(live, inactive) = %q", got)
+	}
+	if got := statusText(broadcast(youtube.LifeReady), youtube.StreamStatus{Status: youtube.StreamActive}, pendingNone); got != "ready" {
+		t.Fatalf("statusText(ready, active) = %q", got)
 	}
 }
 
@@ -106,7 +111,7 @@ func TestSessionSelection(t *testing.T) {
 	start := time.Date(2025, 1, 5, 9, 30, 0, 0, time.Local)
 	s.setBroadcasts([]youtube.Broadcast{{ID: "a", Title: "Service", ScheduledStart: start, LifeCycleStatus: youtube.LifeReady}})
 
-	if id, ok := s.idForLabel(NewStreamLabel); !ok || id != "" {
+	if id, ok := s.idForLabel(newStreamLabel); !ok || id != "" {
 		t.Fatalf("idForLabel(new) = %q, %v", id, ok)
 	}
 	if _, ok := s.idForLabel("nonsense"); ok {
@@ -118,13 +123,13 @@ func TestSessionSelection(t *testing.T) {
 	}
 	s.selectedID = id
 	s.loadDrafts()
-	if s.draftTitle != "Service" || !s.draftStart.Equal(start) || s.thumbnail != KeepCurrentLabel {
+	if s.draftTitle != "Service" || !s.draftStart.Equal(start) || s.thumbnail != keepCurrentLabel {
 		t.Fatalf("drafts not seeded from selection: %+v", s)
 	}
 	if s.selectedLabel() != s.labels[0] {
 		t.Fatalf("selectedLabel = %q", s.selectedLabel())
 	}
-	if s.selectOptions()[0] != NewStreamLabel {
+	if s.selectOptions()[0] != newStreamLabel {
 		t.Fatal("New stream option missing or not first")
 	}
 }

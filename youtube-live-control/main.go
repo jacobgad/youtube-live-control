@@ -64,7 +64,7 @@ func run() error {
 	}
 
 	ctrl := controller.New(controller.Deps{
-		YouTube:      youtube.NewClient(auth, log),
+		YouTube:      youtube.NewClient(auth),
 		Auth:         auth,
 		MQTT:         conn,
 		Options:      cfg.Options,

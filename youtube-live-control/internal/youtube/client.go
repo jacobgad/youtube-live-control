@@ -7,7 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
+	"maps"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -18,8 +18,7 @@ const (
 	apiBase    = "https://www.googleapis.com/youtube/v3"
 	uploadBase = "https://www.googleapis.com/upload/youtube/v3"
 
-	// MaxThumbnailBytes is YouTube's thumbnail upload limit (2 MB).
-	MaxThumbnailBytes = 2 << 20
+	maxThumbnailBytes = 2 << 20
 )
 
 // Broadcast lifecycle and stream status values as reported by the API.
@@ -31,10 +30,8 @@ const (
 	LifeLiveStarting = "liveStarting"
 	LifeLive         = "live"
 	LifeComplete     = "complete"
-	LifeRevoked      = "revoked"
 
 	StreamActive = "active"
-	HealthNoData = "noData"
 
 	TransitionTesting  = "testing"
 	TransitionLive     = "live"
@@ -45,12 +42,21 @@ const (
 type Broadcast struct {
 	ID              string
 	Title           string
-	Description     string
 	ScheduledStart  time.Time
 	PrivacyStatus   string
 	LifeCycleStatus string
 	BoundStreamID   string
 	MonitorEnabled  bool
+	parts           rawParts
+}
+
+// rawParts is the resource exactly as YouTube returned it. An update PUT overwrites
+// every mutable field of each part sent, so the echo is what keeps DVR, latency,
+// embed and caption settings intact when only the title changes.
+type rawParts struct {
+	Snippet        map[string]any
+	Status         map[string]any
+	ContentDetails map[string]any
 }
 
 // StreamStatus is the bound liveStream's ingestion state.
@@ -80,48 +86,46 @@ func HasReason(err error, reason string) bool {
 type Client struct {
 	auth *Auth
 	hc   *http.Client
-	log  *slog.Logger
 }
 
 // NewClient wires the API client to its token source.
-func NewClient(auth *Auth, log *slog.Logger) *Client {
-	if log == nil {
-		log = slog.Default()
-	}
-	return &Client{auth: auth, hc: &http.Client{Timeout: 30 * time.Second}, log: log}
+func NewClient(auth *Auth) *Client {
+	return &Client{auth: auth, hc: &http.Client{Timeout: 30 * time.Second}}
 }
 
 type apiBroadcastItem struct {
-	ID      string `json:"id"`
-	Snippet struct {
-		Title              string `json:"title"`
-		Description        string `json:"description"`
-		ScheduledStartTime string `json:"scheduledStartTime"`
-	} `json:"snippet"`
-	Status struct {
-		LifeCycleStatus string `json:"lifeCycleStatus"`
-		PrivacyStatus   string `json:"privacyStatus"`
-	} `json:"status"`
-	ContentDetails struct {
-		BoundStreamID string `json:"boundStreamId"`
-		MonitorStream struct {
-			EnableMonitorStream bool `json:"enableMonitorStream"`
-		} `json:"monitorStream"`
-	} `json:"contentDetails"`
+	ID             string          `json:"id"`
+	Snippet        json.RawMessage `json:"snippet"`
+	Status         json.RawMessage `json:"status"`
+	ContentDetails json.RawMessage `json:"contentDetails"`
 }
 
 func (i apiBroadcastItem) broadcast() Broadcast {
-	start, _ := time.Parse(time.RFC3339, i.Snippet.ScheduledStartTime)
-	return Broadcast{
+	parts := rawParts{Snippet: decodeMap(i.Snippet), Status: decodeMap(i.Status), ContentDetails: decodeMap(i.ContentDetails)}
+	b := Broadcast{
 		ID:              i.ID,
-		Title:           i.Snippet.Title,
-		Description:     i.Snippet.Description,
-		ScheduledStart:  start,
-		PrivacyStatus:   i.Status.PrivacyStatus,
-		LifeCycleStatus: i.Status.LifeCycleStatus,
-		BoundStreamID:   i.ContentDetails.BoundStreamID,
-		MonitorEnabled:  i.ContentDetails.MonitorStream.EnableMonitorStream,
+		Title:           stringField(parts.Snippet, "title"),
+		PrivacyStatus:   stringField(parts.Status, "privacyStatus"),
+		LifeCycleStatus: stringField(parts.Status, "lifeCycleStatus"),
+		BoundStreamID:   stringField(parts.ContentDetails, "boundStreamId"),
+		parts:           parts,
 	}
+	b.ScheduledStart, _ = time.Parse(time.RFC3339, stringField(parts.Snippet, "scheduledStartTime"))
+	if monitor, ok := parts.ContentDetails["monitorStream"].(map[string]any); ok {
+		b.MonitorEnabled, _ = monitor["enableMonitorStream"].(bool)
+	}
+	return b
+}
+
+func decodeMap(raw json.RawMessage) map[string]any {
+	m := map[string]any{}
+	_ = json.Unmarshal(raw, &m)
+	return m
+}
+
+func stringField(m map[string]any, key string) string {
+	s, _ := m[key].(string)
+	return s
 }
 
 type broadcastListResponse struct {
@@ -166,20 +170,17 @@ func (c *Client) GetBroadcast(ctx context.Context, id string) (Broadcast, bool, 
 	return out.Items[0].broadcast(), true, nil
 }
 
-type writeBroadcast struct {
-	ID      string `json:"id,omitempty"`
+// insertBody has no omitempty on the auto flags so every insert states false
+// explicitly: transitions happen only through the buttons, never because OBS started.
+type insertBody struct {
 	Snippet struct {
 		Title              string `json:"title"`
-		Description        string `json:"description,omitempty"`
 		ScheduledStartTime string `json:"scheduledStartTime"`
 	} `json:"snippet"`
 	Status struct {
 		PrivacyStatus           string `json:"privacyStatus"`
 		SelfDeclaredMadeForKids bool   `json:"selfDeclaredMadeForKids"`
 	} `json:"status"`
-	// enableAutoStart and enableAutoStop are always serialized (no omitempty) so
-	// every insert and update states false explicitly: transitions happen only
-	// through the Go Live and End Stream buttons, never because OBS started or stopped.
 	ContentDetails struct {
 		EnableAutoStart bool `json:"enableAutoStart"`
 		EnableAutoStop  bool `json:"enableAutoStop"`
@@ -189,37 +190,63 @@ type writeBroadcast struct {
 	} `json:"contentDetails"`
 }
 
-func writeBody(b Broadcast) writeBroadcast {
-	var w writeBroadcast
-	w.ID = b.ID
-	w.Snippet.Title = b.Title
-	w.Snippet.Description = b.Description
-	w.Snippet.ScheduledStartTime = b.ScheduledStart.UTC().Format(time.RFC3339)
-	w.Status.PrivacyStatus = b.PrivacyStatus
-	w.ContentDetails.EnableAutoStart = false
-	w.ContentDetails.EnableAutoStop = false
-	w.ContentDetails.MonitorStream.EnableMonitorStream = b.MonitorEnabled
-	return w
+func newInsertBody(title string, start time.Time, privacy string) insertBody {
+	var body insertBody
+	body.Snippet.Title = title
+	body.Snippet.ScheduledStartTime = start.UTC().Format(time.RFC3339)
+	body.Status.PrivacyStatus = privacy
+	return body
+}
+
+// Read-only fields YouTube documents on each part; stripped from the echoed
+// update body so the PUT carries only what the API accepts as input.
+var readOnlyFields = map[string][]string{
+	"snippet":        {"publishedAt", "channelId", "thumbnails", "isDefaultBroadcast", "liveChatId", "actualStartTime", "actualEndTime"},
+	"status":         {"lifeCycleStatus", "recordingStatus", "madeForKids"},
+	"contentDetails": {"boundStreamId", "boundStreamLastUpdateTimeMs"},
+}
+
+func updateBody(b Broadcast) map[string]any {
+	snippet := cloneOrEmpty(b.parts.Snippet)
+	snippet["title"] = b.Title
+	snippet["scheduledStartTime"] = b.ScheduledStart.UTC().Format(time.RFC3339)
+	status := cloneOrEmpty(b.parts.Status)
+	status["privacyStatus"] = b.PrivacyStatus
+	content := cloneOrEmpty(b.parts.ContentDetails)
+	content["enableAutoStart"] = false
+	content["enableAutoStop"] = false
+	body := map[string]any{"id": b.ID, "snippet": snippet, "status": status, "contentDetails": content}
+	for part, keys := range readOnlyFields {
+		for _, key := range keys {
+			delete(body[part].(map[string]any), key)
+		}
+	}
+	return body
+}
+
+func cloneOrEmpty(m map[string]any) map[string]any {
+	if m == nil {
+		return map[string]any{}
+	}
+	return maps.Clone(m)
 }
 
 // InsertBroadcast creates a scheduled broadcast with auto start/stop off and the
 // monitor stream disabled, so ready → live is a single transition. Costs 50 quota units.
 func (c *Client) InsertBroadcast(ctx context.Context, title string, start time.Time, privacy string) (Broadcast, error) {
-	body := writeBody(Broadcast{Title: title, ScheduledStart: start, PrivacyStatus: privacy, MonitorEnabled: false})
-	body.ID = ""
 	var out apiBroadcastItem
-	err := c.do(ctx, http.MethodPost, apiBase+"/liveBroadcasts", url.Values{"part": {broadcastParts}}, body, &out)
+	err := c.do(ctx, http.MethodPost, apiBase+"/liveBroadcasts", url.Values{"part": {broadcastParts}}, newInsertBody(title, start, privacy), &out)
 	if err != nil {
 		return Broadcast{}, err
 	}
 	return out.broadcast(), nil
 }
 
-// UpdateBroadcast replaces the broadcast's snippet, status and contentDetails with b,
-// keeping auto start/stop off. Costs 50 quota units.
+// UpdateBroadcast writes b's title, scheduled start and privacy over the broadcast
+// as last fetched, keeping auto start/stop off. Costs 50 quota units.
 func (c *Client) UpdateBroadcast(ctx context.Context, b Broadcast) (Broadcast, error) {
 	var out apiBroadcastItem
-	err := c.do(ctx, http.MethodPut, apiBase+"/liveBroadcasts", url.Values{"part": {broadcastParts}}, writeBody(b), &out)
+	err := c.do(ctx, http.MethodPut, apiBase+"/liveBroadcasts", url.Values{"part": {broadcastParts}}, updateBody(b), &out)
 	if err != nil {
 		return Broadcast{}, err
 	}
@@ -323,8 +350,8 @@ func (c *Client) ConcurrentViewers(ctx context.Context, videoID string) (int, er
 
 // SetThumbnail uploads a thumbnail image for the broadcast's video. Costs 50 quota units.
 func (c *Client) SetThumbnail(ctx context.Context, videoID, contentType string, image []byte) error {
-	if len(image) > MaxThumbnailBytes {
-		return fmt.Errorf("thumbnail is %d bytes; YouTube's limit is %d", len(image), MaxThumbnailBytes)
+	if len(image) > maxThumbnailBytes {
+		return fmt.Errorf("thumbnail is %d bytes; YouTube's limit is %d", len(image), maxThumbnailBytes)
 	}
 	token, err := c.auth.AccessToken(ctx)
 	if err != nil {

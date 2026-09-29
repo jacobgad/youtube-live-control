@@ -7,10 +7,12 @@ import (
 	"context"
 	"log/slog"
 	"path/filepath"
-	"sort"
+	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/jacobgad/youtube-live-control/internal/config"
 	"github.com/jacobgad/youtube-live-control/internal/mqtt"
@@ -45,8 +47,8 @@ type Controller struct {
 	now          func() time.Time
 	pub          *publisher
 
-	mu sync.Mutex
-	s  session
+	mu      sync.Mutex
+	session session
 
 	ops        chan queuedOp
 	statusKick chan struct{}
@@ -95,8 +97,8 @@ func New(deps Deps) *Controller {
 		statDone:     make(chan struct{}),
 	}
 	c.lifetime, c.endLife = context.WithCancel(context.Background())
-	c.s.thumbnail = KeepCurrentLabel
-	c.s.tun = defaultTunables
+	c.session.thumbnail = keepCurrentLabel
+	c.session.tun = defaultTunables
 
 	c.mqtt.OnMessage(mqtt.NewRouter(mqtt.Actions{
 		BroadcastSelected: c.selectBroadcast,
@@ -128,8 +130,8 @@ func (c *Controller) Start(ctx context.Context) error {
 	}
 	tun := loadTunables(c.settingsPath, c.log)
 	c.mu.Lock()
-	c.s.authorized = c.auth.Authorized()
-	c.s.tun = tun
+	c.session.authorized = c.auth.Authorized()
+	c.session.tun = tun
 	c.mu.Unlock()
 	c.log.Info("controller_started",
 		"authorized", c.auth.Authorized(),
@@ -202,8 +204,8 @@ func (c *Controller) background(fn func(context.Context)) {
 	}()
 }
 
-// enqueue reserves the command's place in the single worker queue inline, so button
-// presses run in press order; a full queue drops the press rather than block the broker.
+// The slot is claimed inline so presses run in press order; a full queue drops the
+// press rather than block the broker's delivery goroutine.
 func (c *Controller) enqueue(name string, op func(context.Context)) {
 	select {
 	case c.ops <- queuedOp{name: name, run: op}:
@@ -235,9 +237,9 @@ func (c *Controller) onMQTTConnected(ctx context.Context) {
 
 func (c *Controller) authChanged(ctx context.Context, authorized bool) {
 	c.mu.Lock()
-	c.s.authorized = authorized
+	c.session.authorized = authorized
 	if authorized {
-		c.s.armFast(c.now())
+		c.session.armFast(c.now())
 	}
 	c.mu.Unlock()
 	c.log.Info("authorization_changed", "authorized", authorized)
@@ -251,23 +253,23 @@ func (c *Controller) authChanged(ctx context.Context, authorized bool) {
 func (c *Controller) snapshot() snapshot {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	b := c.s.selected()
+	b := c.session.selected()
 	now := c.now()
 	return snapshot{
-		authorized:       c.s.authorized,
-		broadcastOptions: c.s.selectOptions(),
-		thumbnailOptions: c.s.thumbnailOptions(),
-		selectedLabel:    c.s.selectedLabel(),
-		title:            c.s.draftTitle,
-		scheduled:        formatWhen(c.s.draftStart),
-		thumbnail:        c.s.thumbnail,
-		health:           healthText(b, c.s.stream),
-		status:           statusText(b, c.s.stream, c.s.pending),
-		viewers:          c.s.viewers,
-		fastMode:         c.s.fastActive(now),
-		fastRemaining:    c.s.fastRemainingMinutes(now),
-		tun:              c.s.tun,
-		g:                computeGates(c.s.authorized, b, c.s.stream, c.s.pending != pendingNone),
+		authorized:       c.session.authorized,
+		broadcastOptions: c.session.selectOptions(),
+		thumbnailOptions: c.session.thumbnailOptions(),
+		selectedLabel:    c.session.selectedLabel(),
+		title:            c.session.draftTitle,
+		scheduled:        formatWhen(c.session.draftStart),
+		thumbnail:        c.session.thumbnail,
+		health:           healthText(b, c.session.stream),
+		status:           statusText(b, c.session.stream, c.session.pending),
+		viewers:          c.session.viewers,
+		fastMode:         c.session.fastActive(now),
+		fastRemaining:    c.session.fastRemainingMinutes(now),
+		tun:              c.session.tun,
+		gates:            computeGates(c.session.authorized, b, c.session.stream, c.session.pending != pendingNone),
 	}
 }
 
@@ -278,12 +280,11 @@ func (c *Controller) kickListPoll() {
 	}
 }
 
-// pressed arms the fast-refresh window on every button press — even one whose
-// operation is later refused, since a refused End press is exactly "human waiting
-// for streamStatus to catch up" — then queues the operation.
+// Armed before the operation runs: a refused End press is exactly "human waiting
+// for streamStatus to catch up", the moment a fast poll is wanted most.
 func (c *Controller) pressed(name string, op func(context.Context)) {
 	c.mu.Lock()
-	c.s.armFast(c.now())
+	c.session.armFast(c.now())
 	c.mu.Unlock()
 	c.log.Debug("fast_mode_armed", "reason", name+"_press")
 	c.kickStatusPoll()
@@ -293,9 +294,9 @@ func (c *Controller) pressed(name string, op func(context.Context)) {
 func (c *Controller) switchFastMode(on bool) {
 	c.mu.Lock()
 	if on {
-		c.s.armFast(c.now())
+		c.session.armFast(c.now())
 	} else {
-		c.s.fastUntil = time.Time{}
+		c.session.fastUntil = time.Time{}
 	}
 	c.mu.Unlock()
 	c.log.Info("fast_mode_switched", "on", on)
@@ -305,9 +306,7 @@ func (c *Controller) switchFastMode(on bool) {
 	}
 }
 
-// setTunable applies a settings number: validate against the entity's range, apply,
-// persist to /data, republish, and wake the loops so the new cadence takes effect
-// immediately. Settings changes are admin work and do not arm the fast window.
+// Settings are admin work, not panel use, so they deliberately do not arm the fast window.
 func (c *Controller) setTunable(object, raw string) {
 	spec, ok := tunableSpec(object)
 	if !ok {
@@ -320,8 +319,8 @@ func (c *Controller) setTunable(object, raw string) {
 		return
 	}
 	c.mu.Lock()
-	*tunableFields[object](&c.s.tun) = value
-	saved := c.s.tun
+	*tunableFields[object](&c.session.tun) = value
+	saved := c.session.tun
 	c.mu.Unlock()
 	c.log.Info("setting_changed", "setting", object, "value", value)
 	if err := saved.save(c.settingsPath); err != nil {
@@ -341,13 +340,10 @@ func (c *Controller) kickStatusPoll() {
 	}
 }
 
-// selectBroadcast handles the Broadcast select: on any valid change it re-seeds the
-// drafts and republishes every detail entity so the panel pre-fills, then verifies
-// against the API with an immediate status poll.
 func (c *Controller) selectBroadcast(label string) {
 	c.mu.Lock()
-	c.s.armFast(c.now())
-	id, ok := c.s.idForLabel(label)
+	c.session.armFast(c.now())
+	id, ok := c.session.idForLabel(label)
 	if !ok {
 		c.mu.Unlock()
 		c.log.Warn("select_rejected", "label", label, "reason", "unknown_option")
@@ -355,9 +351,9 @@ func (c *Controller) selectBroadcast(label string) {
 		c.kickStatusPoll()
 		return
 	}
-	c.s.selectedID = id
-	c.s.pending = pendingNone
-	c.s.loadDrafts()
+	c.session.selectedID = id
+	c.session.pending = pendingNone
+	c.session.loadDrafts()
 	c.mu.Unlock()
 	c.log.Info("broadcast_selected", "id", id, "label", label)
 	c.publishUpdate()
@@ -366,13 +362,14 @@ func (c *Controller) selectBroadcast(label string) {
 
 func (c *Controller) enterTitle(raw string) {
 	c.armFastMode("title")
-	if len(raw) == 0 || len(raw) > mqtt.MaxTitleLength {
-		c.log.Warn("title_rejected", "length", len(raw))
+	title := strings.TrimSpace(raw)
+	if length := utf8.RuneCountInString(title); length == 0 || length > mqtt.MaxTitleLength {
+		c.log.Warn("title_rejected", "length", length)
 		c.snapBack(mqtt.TitleState)
 		return
 	}
 	c.mu.Lock()
-	c.s.draftTitle = raw
+	c.session.draftTitle = title
 	c.mu.Unlock()
 	c.publishUpdate()
 }
@@ -386,7 +383,7 @@ func (c *Controller) enterScheduled(raw string) {
 		return
 	}
 	c.mu.Lock()
-	c.s.draftStart = when
+	c.session.draftStart = when
 	c.mu.Unlock()
 	c.publishUpdate()
 }
@@ -394,20 +391,20 @@ func (c *Controller) enterScheduled(raw string) {
 func (c *Controller) selectThumbnail(label string) {
 	c.armFastMode("thumbnail")
 	c.mu.Lock()
-	if !c.s.validThumbnail(label) {
+	if !c.session.validThumbnail(label) {
 		c.mu.Unlock()
 		c.log.Warn("thumbnail_rejected", "label", label, "reason", "unknown_option")
 		c.snapBack(mqtt.ThumbnailState)
 		return
 	}
-	c.s.thumbnail = label
+	c.session.thumbnail = label
 	c.mu.Unlock()
 	c.publishUpdate()
 }
 
 func (c *Controller) armFastMode(reason string) {
 	c.mu.Lock()
-	c.s.armFast(c.now())
+	c.session.armFast(c.now())
 	c.mu.Unlock()
 	c.log.Debug("fast_mode_armed", "reason", reason)
 	c.kickStatusPoll()
@@ -417,14 +414,11 @@ func (c *Controller) publishUpdate() {
 	c.background(func(ctx context.Context) { c.pub.update(ctx, c.snapshot) })
 }
 
-// snapBack re-sends the retained state for a rejected command so the field in Home
-// Assistant reverts instead of sticking on the rejected value.
 func (c *Controller) snapBack(topics ...string) {
 	c.pub.invalidate(topics...)
 	c.publishUpdate()
 }
 
-// scanThumbnails lists the image files offered by the Thumbnail select.
 func scanThumbnails(dir string) []string {
 	var files []string
 	for _, pattern := range []string{"*.jpg", "*.jpeg", "*.png"} {
@@ -433,6 +427,6 @@ func scanThumbnails(dir string) []string {
 			files = append(files, filepath.Base(m))
 		}
 	}
-	sort.Strings(files)
+	slices.Sort(files)
 	return files
 }

@@ -114,19 +114,19 @@ func TestFastWindow(t *testing.T) {
 
 func TestStatusDelayTiers(t *testing.T) {
 	c := &Controller{now: time.Now, opts: config.Options{}}
-	c.s.tun = defaultTunables
+	c.session.tun = defaultTunables
 
 	if got := c.statusDelay(); got != defaultTunables.idlePoll() {
 		t.Fatalf("idle tier = %v", got)
 	}
 
-	c.s.setBroadcasts([]youtube.Broadcast{{ID: "b1", Title: "Service", LifeCycleStatus: youtube.LifeLive}})
-	c.s.selectedID = "b1"
+	c.session.setBroadcasts([]youtube.Broadcast{{ID: "b1", Title: "Service", LifeCycleStatus: youtube.LifeLive}})
+	c.session.selectedID = "b1"
 	if got := c.statusDelay(); got != defaultTunables.livePoll() {
 		t.Fatalf("live tier = %v", got)
 	}
 
-	c.s.armFast(time.Now())
+	c.session.armFast(time.Now())
 	if got := c.statusDelay(); got != defaultTunables.fastPoll() {
 		t.Fatalf("fast tier = %v", got)
 	}

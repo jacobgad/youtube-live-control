@@ -1,9 +1,10 @@
 package controller
 
 import (
+	"cmp"
 	"context"
 	"errors"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/jacobgad/youtube-live-control/internal/youtube"
@@ -26,7 +27,7 @@ func (c *Controller) listLoop() {
 func (c *Controller) listDelay() time.Duration {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.s.tun.listPoll()
+	return c.session.tun.listPoll()
 }
 
 func (c *Controller) statusLoop() {
@@ -44,28 +45,26 @@ func (c *Controller) statusLoop() {
 	}
 }
 
-// statusDelay picks the polling tier: fast while the fast-refresh window is armed,
-// live cadence while the selected broadcast is on air, otherwise the idle baseline.
 func (c *Controller) statusDelay() time.Duration {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.s.fastActive(c.now()) {
-		return c.s.tun.fastPoll()
+	if c.session.fastActive(c.now()) {
+		return c.session.tun.fastPoll()
 	}
-	if b := c.s.selected(); b != nil && (b.LifeCycleStatus == youtube.LifeLive || b.LifeCycleStatus == youtube.LifeLiveStarting) {
-		return c.s.tun.livePoll()
+	if b := c.session.selected(); b != nil && (b.LifeCycleStatus == youtube.LifeLive || b.LifeCycleStatus == youtube.LifeLiveStarting) {
+		return c.session.tun.livePoll()
 	}
-	return c.s.tun.idlePoll()
+	return c.session.tun.idlePoll()
 }
 
-// reapFastMode expires the window — the service, not Home Assistant, owns the
-// switch's OFF transition — and keeps the countdown ticking while armed.
+// The service, not Home Assistant, owns the switch's OFF transition; publishing on
+// every armed tick is also what keeps the countdown sensor moving.
 func (c *Controller) reapFastMode(ctx context.Context) {
 	c.mu.Lock()
-	armed := !c.s.fastUntil.IsZero()
-	expired := armed && !c.now().Before(c.s.fastUntil)
+	armed := !c.session.fastUntil.IsZero()
+	expired := armed && !c.now().Before(c.session.fastUntil)
 	if expired {
-		c.s.fastUntil = time.Time{}
+		c.session.fastUntil = time.Time{}
 	}
 	c.mu.Unlock()
 	if expired {
@@ -76,9 +75,8 @@ func (c *Controller) reapFastMode(ctx context.Context) {
 	}
 }
 
-// refreshList is the slow poll: upcoming and active broadcasts (2 quota units) plus a
-// re-scan of the thumbnails directory. The selected broadcast is pinned so it never
-// drops out of the options while in use. Drafts are never touched here.
+// The selected broadcast is pinned into the list so it cannot vanish from the select
+// mid-service (a live broadcast leaves "upcoming"); drafts are never touched here.
 func (c *Controller) refreshList(ctx context.Context) {
 	if !c.auth.Authorized() {
 		return
@@ -95,7 +93,7 @@ func (c *Controller) refreshList(ctx context.Context) {
 	}
 	merged := make([]youtube.Broadcast, 0, len(upcoming)+len(active)+1)
 	seen := map[string]bool{}
-	for _, b := range append(active, upcoming...) {
+	for _, b := range slices.Concat(active, upcoming) {
 		if !seen[b.ID] {
 			seen[b.ID] = true
 			merged = append(merged, b)
@@ -104,25 +102,16 @@ func (c *Controller) refreshList(ctx context.Context) {
 	thumbs := scanThumbnails(c.opts.ThumbnailsDir)
 
 	c.mu.Lock()
-	if c.s.selectedID != "" && !seen[c.s.selectedID] {
-		if pinned := c.s.selected(); pinned != nil {
+	if c.session.selectedID != "" && !seen[c.session.selectedID] {
+		if pinned := c.session.selected(); pinned != nil {
 			merged = append(merged, *pinned)
 		}
 	}
-	sort.SliceStable(merged, func(i, j int) bool {
-		a, b := merged[i], merged[j]
-		if a.ScheduledStart.IsZero() != b.ScheduledStart.IsZero() {
-			return b.ScheduledStart.IsZero()
-		}
-		if !a.ScheduledStart.Equal(b.ScheduledStart) {
-			return a.ScheduledStart.Before(b.ScheduledStart)
-		}
-		return a.Title < b.Title
-	})
-	c.s.setBroadcasts(merged)
-	c.s.thumbFiles = thumbs
-	if !c.s.validThumbnail(c.s.thumbnail) {
-		c.s.thumbnail = KeepCurrentLabel
+	slices.SortStableFunc(merged, compareBroadcasts)
+	c.session.setBroadcasts(merged)
+	c.session.thumbFiles = thumbs
+	if !c.session.validThumbnail(c.session.thumbnail) {
+		c.session.thumbnail = keepCurrentLabel
 	}
 	c.mu.Unlock()
 
@@ -130,14 +119,22 @@ func (c *Controller) refreshList(ctx context.Context) {
 	c.pub.update(ctx, c.snapshot)
 }
 
-// pollStatus re-reads the selected broadcast: the broadcast (1 unit), its bound
-// stream (1 unit) and, while live, the viewer count (1 unit). Every publish comes
-// from these reads, never from intent.
+// Unscheduled broadcasts sort last; otherwise by start, then title for a stable label order.
+func compareBroadcasts(a, b youtube.Broadcast) int {
+	if a.ScheduledStart.IsZero() != b.ScheduledStart.IsZero() {
+		if a.ScheduledStart.IsZero() {
+			return 1
+		}
+		return -1
+	}
+	return cmp.Or(a.ScheduledStart.Compare(b.ScheduledStart), cmp.Compare(a.Title, b.Title))
+}
+
 func (c *Controller) pollStatus(ctx context.Context) {
 	c.mu.Lock()
-	id := c.s.selectedID
-	authorized := c.s.authorized
-	pending := c.s.pending
+	id := c.session.selectedID
+	authorized := c.session.authorized
+	pending := c.session.pending
 	c.mu.Unlock()
 	if !authorized || id == "" || pending != pendingNone {
 		return
@@ -169,10 +166,10 @@ func (c *Controller) pollStatus(ctx context.Context) {
 	}
 
 	c.mu.Lock()
-	c.s.apply(b)
-	if c.s.selectedID == id {
-		c.s.stream = stream
-		c.s.viewers = viewers
+	c.session.apply(b)
+	if c.session.selectedID == id {
+		c.session.stream = stream
+		c.session.viewers = viewers
 	}
 	c.mu.Unlock()
 	c.pub.update(ctx, c.snapshot)

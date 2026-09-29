@@ -1,6 +1,9 @@
 package mqtt
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"maps"
+)
 
 // Origin identifies this add-on in discovery payloads.
 type Origin struct {
@@ -135,9 +138,7 @@ func commandEntity(component, object, name, icon string, fields map[string]any, 
 
 func sensor(object, name, icon, stateTopic string, extra map[string]any, o Origin) Message {
 	fields := map[string]any{"state_topic": stateTopic}
-	for k, v := range extra {
-		fields[k] = v
-	}
+	maps.Copy(fields, extra)
 	m := base("sensor", object, name, icon, fields, o)
 	m.Payload["availability"] = []map[string]any{controllerAvailability()}
 	return m
@@ -167,10 +168,7 @@ func authSensor(o Origin) Message {
 }
 
 func base(component, object, name, icon string, fields map[string]any, o Origin) Message {
-	payload := map[string]any{}
-	for k, v := range fields {
-		payload[k] = v
-	}
+	payload := maps.Clone(fields)
 	payload["name"] = name
 	payload["unique_id"] = NodeID + "_" + object
 	payload["object_id"] = NodeID + "_" + object

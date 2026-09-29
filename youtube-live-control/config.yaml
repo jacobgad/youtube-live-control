@@ -1,5 +1,5 @@
 name: YouTube Live Control
-version: "1.0.0"
+version: "1.0.1"
 slug: youtube_live_control
 description: One-panel MQTT control for scheduled YouTube live broadcasts — pick, edit, go live, end
 url: https://github.com/jacobgad/youtube-live-control

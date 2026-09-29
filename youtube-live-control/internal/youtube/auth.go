@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/jacobgad/youtube-live-control/internal/atomicfile"
 )
 
 const (
@@ -60,6 +62,20 @@ func NewAuth(clientID, clientSecret, tokenPath string, log *slog.Logger) *Auth {
 		log:          log,
 		now:          time.Now,
 	}
+}
+
+// String renders the client without its secret or tokens, so formatting an Auth
+// (or anything holding one) can never leak a credential into logs.
+func (a *Auth) String() string {
+	return fmt.Sprintf("youtube.Auth{clientID=%s authorized=%v}", a.clientID, a.Authorized())
+}
+
+// GoString mirrors String for %#v, which bypasses Stringer.
+func (a *Auth) GoString() string { return a.String() }
+
+// LogValue renders the client for slog without the secret or tokens.
+func (a *Auth) LogValue() slog.Value {
+	return slog.GroupValue(slog.String("clientID", a.clientID), slog.Bool("authorized", a.Authorized()))
 }
 
 // OnChange registers the single observer notified when authorization is gained or lost.
@@ -179,7 +195,7 @@ func (a *Auth) AccessToken(ctx context.Context) (string, error) {
 	if err != nil {
 		var oe *oauthError
 		if errors.As(err, &oe) && oe.Code == "invalid_grant" {
-			a.revoke()
+			a.revoke(refresh)
 			return "", ErrNotAuthorized
 		}
 		return "", err
@@ -191,10 +207,14 @@ func (a *Auth) AccessToken(ctx context.Context) (string, error) {
 	return resp.AccessToken, nil
 }
 
-// revoke forgets a refresh token Google no longer accepts (revoked or expired) so the
-// UI and the Authorization sensor flip to unauthorized instead of erroring forever.
-func (a *Auth) revoke() {
+// Flips the UI and Authorization sensor to unauthorized instead of erroring forever;
+// only the token that failed is cleared, so a consent that landed meanwhile is kept.
+func (a *Auth) revoke(failed string) {
 	a.mu.Lock()
+	if a.refresh != failed {
+		a.mu.Unlock()
+		return
+	}
 	a.refresh = ""
 	a.access = ""
 	notify := a.onChange
@@ -247,8 +267,5 @@ func (a *Auth) persist(refreshToken string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(a.tokenPath, data, 0o600); err != nil {
-		return fmt.Errorf("write %s: %w", a.tokenPath, err)
-	}
-	return nil
+	return atomicfile.Write(a.tokenPath, data, 0o600)
 }

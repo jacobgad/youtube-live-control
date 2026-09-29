@@ -13,8 +13,6 @@ import (
 
 const publishTimeout = 5 * time.Second
 
-// snapshot is one coherent view of the session, rendered to MQTT as a unit so a
-// selection change republishes every detail entity together.
 type snapshot struct {
 	authorized       bool
 	broadcastOptions []string
@@ -29,7 +27,7 @@ type snapshot struct {
 	fastMode         bool
 	fastRemaining    int
 	tun              tunables
-	g                gates
+	gates            gates
 }
 
 type message struct {
@@ -37,9 +35,8 @@ type message struct {
 	payload string
 }
 
-// publisher renders snapshots to retained topics and remembers what it last sent so
-// unchanged values are not repeated. Every entry point holds mu for its whole duration:
-// retained topics keep only the last message, so ordering matters more than throughput.
+// publisher holds mu for a whole sweep and builds the snapshot under it: retained
+// topics keep only the last message, so a later snapshot must never be sent first.
 type publisher struct {
 	conn   mqtt.Connection
 	origin mqtt.Origin
@@ -53,12 +50,6 @@ func newPublisher(conn mqtt.Connection, origin mqtt.Origin, log *slog.Logger) *p
 	return &publisher{conn: conn, origin: origin, log: log, last: map[string]string{}}
 }
 
-// Both entry points take the snapshot as a function and build it under mu, so a
-// snapshot taken later can never be published before an earlier one: retained
-// topics stay monotonic even when updates race.
-
-// everything forgets the dedupe history and republishes every topic, for (re)connects
-// and Home Assistant restarts.
 func (p *publisher) everything(ctx context.Context, snap func() snapshot) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -66,15 +57,14 @@ func (p *publisher) everything(ctx context.Context, snap func() snapshot) {
 	p.send(ctx, snap())
 }
 
-// update publishes whatever changed since the last send.
 func (p *publisher) update(ctx context.Context, snap func() snapshot) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.send(ctx, snap())
 }
 
-// invalidate forces the next update to re-send the given topics even when unchanged,
-// which is how a rejected command snaps the Home Assistant field back.
+// invalidate is how a rejected command snaps the Home Assistant field back: the
+// unchanged value would otherwise be deduped away.
 func (p *publisher) invalidate(topics ...string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -83,9 +73,9 @@ func (p *publisher) invalidate(topics ...string) {
 	}
 }
 
+// controllerOffline skips mu on purpose: Stop calls it under a deadline and must not
+// queue behind a sweep that is still waiting on the broker.
 func (p *publisher) controllerOffline(ctx context.Context) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	p.publish(ctx, mqtt.ControllerAvailability, mqtt.PayloadOffline)
 }
 
@@ -94,8 +84,9 @@ func (p *publisher) send(ctx context.Context, snap snapshot) {
 		if prev, ok := p.last[m.topic]; ok && prev == m.payload {
 			continue
 		}
-		p.last[m.topic] = m.payload
-		p.publish(ctx, m.topic, m.payload)
+		if p.publish(ctx, m.topic, m.payload) {
+			p.last[m.topic] = m.payload
+		}
 	}
 }
 
@@ -124,10 +115,10 @@ func render(snap snapshot, origin mqtt.Origin) []message {
 		message{mqtt.HealthState, snap.health},
 		message{mqtt.StatusState, snap.status},
 		message{mqtt.ViewersState, strconv.Itoa(snap.viewers)},
-		message{mqtt.SaveAvailability, availability(snap.g.save)},
-		message{mqtt.CreateAvailability, availability(snap.g.create)},
-		message{mqtt.GoLiveAvailability, availability(snap.g.goLive)},
-		message{mqtt.EndAvailability, availability(snap.g.end)},
+		message{mqtt.SaveAvailability, availability(snap.gates.save)},
+		message{mqtt.CreateAvailability, availability(snap.gates.create)},
+		message{mqtt.GoLiveAvailability, availability(snap.gates.goLive)},
+		message{mqtt.EndAvailability, availability(snap.gates.end)},
 	)
 	tun := snap.tun
 	for _, spec := range mqtt.TunableSpecs {
@@ -143,15 +134,17 @@ func availability(enabled bool) string {
 	return mqtt.PayloadOffline
 }
 
-func (p *publisher) publish(ctx context.Context, topic, payload string) {
+func (p *publisher) publish(ctx context.Context, topic, payload string) bool {
 	pubCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), publishTimeout)
 	defer cancel()
 	err := p.conn.Publish(pubCtx, topic, payload, true)
 	switch {
 	case err == nil:
+		return true
 	case errors.Is(err, mqtt.ErrNotConnected):
 		p.log.Debug("mqtt_publish_deferred", "topic", topic)
 	default:
 		p.log.Warn("mqtt_publish_failed", "topic", topic, "error", err)
 	}
+	return false
 }

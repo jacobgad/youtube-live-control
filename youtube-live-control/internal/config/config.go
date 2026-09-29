@@ -17,8 +17,8 @@ import (
 )
 
 // Options are the validated add-on options: infrastructure that needs a restart.
-// Runtime behaviour (poll tiers, fast window, create lead) is tuned through the
-// add-on's own MQTT number entities instead and persists in /data.
+// Runtime behaviour (poll tiers, fast window) is tuned through the add-on's own
+// MQTT number entities instead and persists in /data.
 type Options struct {
 	GoogleClientID     string
 	GoogleClientSecret string
@@ -26,6 +26,27 @@ type Options struct {
 	Privacy            string
 	ThumbnailsDir      string
 	LogLevel           slog.Level
+}
+
+// String renders the options without the client secret, so formatting an Options
+// value (or any struct containing one) can never leak the credential into logs.
+func (o Options) String() string {
+	return fmt.Sprintf("Options{clientID=%s externalURL=%s privacy=%s thumbnailsDir=%s logLevel=%s}",
+		o.GoogleClientID, o.ExternalURL, o.Privacy, o.ThumbnailsDir, o.LogLevel)
+}
+
+// GoString mirrors String for %#v, which bypasses Stringer.
+func (o Options) GoString() string { return o.String() }
+
+// LogValue renders the options for slog without the client secret.
+func (o Options) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("clientID", o.GoogleClientID),
+		slog.String("externalURL", o.ExternalURL),
+		slog.String("privacy", o.Privacy),
+		slog.String("thumbnailsDir", o.ThumbnailsDir),
+		slog.String("logLevel", o.LogLevel.String()),
+	)
 }
 
 // MQTT is how to reach the broker.

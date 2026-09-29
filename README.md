@@ -58,7 +58,7 @@ Broadcasts created by the add-on disable the monitor stream (`ready → live` in
 
 ## Development
 
-Requires Go ≥ 1.27, [golangci-lint](https://golangci-lint.run) v2, Docker for images.
+Requires Go ≥ 1.27, [golangci-lint](https://golangci-lint.run) v2, Docker for images. CI runs the same gate on every push, validates the add-on config and builds the image for both supported architectures.
 
 ```bash
 cd youtube-live-control

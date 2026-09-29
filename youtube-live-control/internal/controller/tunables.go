@@ -3,19 +3,17 @@ package controller
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jacobgad/youtube-live-control/internal/atomicfile"
 	"github.com/jacobgad/youtube-live-control/internal/mqtt"
 )
 
-// tunables are the runtime-adjustable settings behind the configuration number
-// entities, persisted in /data so they survive restarts without living in the
-// add-on options (which would need a restart to change).
+// Persisted in /data rather than the add-on options so a change needs no restart.
 type tunables struct {
 	ListPollMinutes int `json:"list_poll_minutes"`
 	FastPollSeconds int `json:"fast_poll_seconds"`
@@ -55,8 +53,7 @@ func (t tunables) fastWindow() time.Duration { return time.Duration(t.FastModeMi
 func (t tunables) livePoll() time.Duration   { return time.Duration(t.LivePollSeconds) * time.Second }
 func (t tunables) idlePoll() time.Duration   { return time.Duration(t.IdlePollMinutes) * time.Minute }
 
-// loadTunables overlays the persisted settings onto the defaults, clamping each
-// value to its entity's range so a hand-edited file cannot stall the poll loops.
+// Clamped to the entity ranges so a hand-edited file cannot stall the poll loops.
 func loadTunables(path string, log *slog.Logger) tunables {
 	t := defaultTunables
 	data, err := os.ReadFile(path) //nolint:gosec // path is fixed by the add-on
@@ -87,14 +84,10 @@ func (t tunables) save(path string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(path, data, 0o600); err != nil {
-		return fmt.Errorf("write %s: %w", path, err)
-	}
-	return nil
+	return atomicfile.Write(path, data, 0o600)
 }
 
-// parseIntPayload accepts integers and integer-valued decimals such as "5.0",
-// which Home Assistant may send for a number entity.
+// Home Assistant may send "5.0" for a step-1 number.
 func parseIntPayload(raw string) (int, bool) {
 	value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
 	if err != nil {

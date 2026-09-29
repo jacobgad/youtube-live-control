@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.1
+
+- **Save no longer resets other broadcast settings.** The update echoed only the fields the add-on knows about, and YouTube overwrites every mutable property in a part it receives — so DVR, latency, embed and caption settings on a Studio-created broadcast were reset on every Save. The broadcast is now written back exactly as fetched with only the title, scheduled start, privacy and the (always-false) auto start/stop flags changed.
+- `live (waiting for stream to stop)` now shows whenever the broadcast is live and YouTube still reports the stream `active` — exactly the condition that keeps **End Stream** unavailable — rather than only when the health verdict had already dropped to `noData`.
+- Google client secret and OAuth tokens can no longer appear in formatted log output.
+- Title length is counted in characters, not bytes, matching Home Assistant's 100-character limit for non-Latin titles; surrounding whitespace is trimmed.
+- Token and settings files are written atomically; a failed publish is retried on the next update rather than deduped away; shutdown no longer waits behind an in-flight publish sweep; the OAuth code exchange completes even if the browser tab is closed mid-way; a re-consent that lands during a failed token refresh is kept.
+- CI on GitHub Actions: add-on config validation, lint and race-test gate, and image builds for both architectures on every push.
+
 ## 1.0.0
 
 Initial release.

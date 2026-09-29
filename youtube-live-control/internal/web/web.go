@@ -21,14 +21,15 @@ import (
 	"github.com/jacobgad/youtube-live-control/internal/youtube"
 )
 
-// Ports: ingress is proxied by the Supervisor; the callback port is exposed on the
-// host because Google must be able to redirect the volunteer's browser to it.
+// Both ports must match config.yaml (ingress_port and ports); the callback port is
+// exposed on the host because Google must be able to redirect the browser to it.
 const (
-	IngressPort  = 8099
-	CallbackPort = 8098
+	ingressPort  = 8099
+	callbackPort = 8098
 
 	stateTTL        = 15 * time.Minute
 	shutdownTimeout = 5 * time.Second
+	exchangeTimeout = 30 * time.Second
 )
 
 // Server is the ingress UI plus the OAuth callback listener.
@@ -63,8 +64,14 @@ func (s *Server) Run(ctx context.Context) error {
 	callbackMux := http.NewServeMux()
 	callbackMux.HandleFunc("GET /oauth/callback", s.handleCallback)
 
-	ingress := &http.Server{Addr: fmt.Sprintf(":%d", IngressPort), Handler: ingressMux, ReadHeaderTimeout: 10 * time.Second}
-	callback := &http.Server{Addr: fmt.Sprintf(":%d", CallbackPort), Handler: callbackMux, ReadHeaderTimeout: 10 * time.Second}
+	ingress := &http.Server{Addr: fmt.Sprintf(":%d", ingressPort), Handler: ingressMux, ReadHeaderTimeout: 10 * time.Second}
+	callback := &http.Server{Addr: fmt.Sprintf(":%d", callbackPort), Handler: callbackMux, ReadHeaderTimeout: 10 * time.Second}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		_ = ingress.Shutdown(shutdownCtx)
+		_ = callback.Shutdown(shutdownCtx)
+	}()
 
 	errCh := make(chan error, 2)
 	go func() { errCh <- serve(ingress, "ingress", s.log) }()
@@ -72,14 +79,16 @@ func (s *Server) Run(ctx context.Context) error {
 
 	select {
 	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
-		defer cancel()
-		_ = ingress.Shutdown(shutdownCtx)
-		_ = callback.Shutdown(shutdownCtx)
 		return nil
 	case err := <-errCh:
 		return err
 	}
+}
+
+// exchangeContext outlives the browser request: a single-use code must not be lost
+// because the volunteer closed the tab mid-exchange.
+func exchangeContext(r *http.Request) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(r.Context()), exchangeTimeout)
 }
 
 func serve(srv *http.Server, name string, log *slog.Logger) error {
@@ -126,9 +135,8 @@ func (s *Server) renderPage(w http.ResponseWriter, r *http.Request, errMsg, noti
 	}
 }
 
-// redirectURI is what Google redirects to and therefore what must be registered on
-// the OAuth client: the external_url option when set, otherwise the host the browser
-// used to reach Home Assistant, on the callback port.
+// redirectURI must match what is registered on the OAuth client byte for byte;
+// external_url exists for when the browser's Host header is not that address.
 func (s *Server) redirectURI(r *http.Request) string {
 	if s.opts.ExternalURL != "" {
 		return s.opts.ExternalURL + "/oauth/callback"
@@ -137,7 +145,7 @@ func (s *Server) redirectURI(r *http.Request) string {
 	if h, _, err := net.SplitHostPort(host); err == nil {
 		host = h
 	}
-	return fmt.Sprintf("http://%s:%d/oauth/callback", host, CallbackPort)
+	return fmt.Sprintf("http://%s:%d/oauth/callback", host, callbackPort)
 }
 
 func (s *Server) newState(redirectURI string) (string, error) {
@@ -182,7 +190,9 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 		writeResult(w, http.StatusBadRequest, "Unknown or expired sign-in attempt. Reopen the add-on page and try again.")
 		return
 	}
-	if err := s.auth.Exchange(r.Context(), q.Get("code"), entry.redirectURI); err != nil {
+	ctx, cancel := exchangeContext(r)
+	defer cancel()
+	if err := s.auth.Exchange(ctx, q.Get("code"), entry.redirectURI); err != nil {
 		s.log.Error("oauth_exchange_failed", "error", err.Error())
 		writeResult(w, http.StatusBadGateway, "Token exchange failed: "+err.Error())
 		return
@@ -190,8 +200,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 	writeResult(w, http.StatusOK, "Connected. You can close this tab; the entities in Home Assistant are now live.")
 }
 
-// handleManual accepts the full redirect URL (or a bare code) pasted into the ingress
-// page, for networks where the callback port is unreachable from the browser.
+// Fallback for networks where the callback port is unreachable from the browser.
 func (s *Server) handleManual(w http.ResponseWriter, r *http.Request) {
 	raw := strings.TrimSpace(r.FormValue("response"))
 	if raw == "" {
@@ -212,7 +221,9 @@ func (s *Server) handleManual(w http.ResponseWriter, r *http.Request) {
 		}
 		redirectURI = entry.redirectURI
 	}
-	if err := s.auth.Exchange(r.Context(), code, redirectURI); err != nil {
+	ctx, cancel := exchangeContext(r)
+	defer cancel()
+	if err := s.auth.Exchange(ctx, code, redirectURI); err != nil {
 		s.log.Error("oauth_exchange_failed", "error", err.Error())
 		s.renderPage(w, r, "Token exchange failed: "+err.Error(), "")
 		return

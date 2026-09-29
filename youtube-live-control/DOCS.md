@@ -69,7 +69,7 @@ One MQTT device, **YouTube Live** — a selector plus a detail panel, not one en
 | **Thumbnail** | select | **Keep current** or a file from `thumbnails_dir`; uploaded on **Save** / **Create**. |
 | **Fast refresh** | switch | The fast-poll window: auto-armed by any panel interaction, re-armable and cancellable by hand. The add-on turns it off itself when the window expires. |
 | **Fast refresh remaining** | sensor | Minutes left in the armed window; 0 while off. |
-| **Stream health** | sensor | The bound stream: `inactive` / `ready` / `active`… then `good` / `ok` / `bad` / `noData` while receiving; `no stream bound` when there is none. |
+| **Stream health** | sensor | The bound stream's ingestion state (`inactive` / `ready` / `created` / `error`) until it is receiving, then YouTube's health verdict (`good` / `ok` / `bad` / `noData`); `no stream bound` when there is none. |
 | **Broadcast status** | sensor | `ready`, `live`, `complete`, … plus `starting`, `ending` and `live (waiting for stream to stop)`. |
 | **Viewers** | sensor | Concurrent viewers while live, else 0. |
 | **Save** | button | Writes Title / Scheduled start / Thumbnail to the selected broadcast. |
@@ -85,7 +85,7 @@ Invalid input (a malformed date, a title over 100 characters, an unknown option)
 Everything is **verify → write → read back**; the entities only move when YouTube confirms. State is retained, commands are not, and command replays from the broker are ignored — restarts never start or stop a broadcast.
 
 - Broadcasts are created and saved with `enableAutoStart` and `enableAutoStop` explicitly **false**. OBS starting or stopping never transitions the broadcast; only the buttons do.
-- **Go Live** is available only while the bound stream's `streamStatus` is `active` — i.e. OBS is actually sending. Start OBS, watch **Stream health** go `active`/`good`, then press it.
+- **Go Live** is available only while the bound stream's `streamStatus` is `active` — i.e. OBS is actually sending. Start OBS, watch **Stream health** switch from `inactive` to `good`, then press it.
 - **End Stream** is available only while live **and** after the stream has stopped. Stop OBS first; YouTube's `streamStatus` lags by up to a minute, during which **Broadcast status** shows `live (waiting for stream to stop)` and the button stays unavailable. When the status catches up, the button becomes available.
 - Broadcasts created in YouTube Studio with a monitor stream are taken through `testing` automatically on the way to live; broadcasts created by the add-on disable the monitor stream and go live in one step.
 - The gate is re-verified against the API at the moment a button is pressed, not just against the last poll.
@@ -100,7 +100,7 @@ The YouTube Data API allows 10,000 units/day by default. Reads cost 1; insert/up
 | Live | broadcast is on air | 60 s | ~180 units/hour |
 | Fast | **Fast refresh** armed | 3 s | ~40 units/minute, window capped at 5 min |
 
-The fast window is armed automatically by **any** interaction with the panel — changing the selection, typing a title, pressing a button (even a refused press: tapping End Stream while YouTube still reports the stream active is exactly the moment you want a fast poll). Each interaction restarts the timer, and the add-on switches it off itself when the window expires — so a dashboard left on Sunday's selection cannot drain Monday's quota.
+The fast window is armed automatically by **any** interaction with the panel — changing the selection, typing a title, pressing a button (even a refused press: tapping End Stream while YouTube still reports the stream active is exactly the moment you want a fast poll). Each interaction restarts the timer, and the add-on switches it off itself when the window expires — so a dashboard left on Sunday's selection cannot drain Monday's quota. It also self-arms when a Go Live / End Stream transition finishes and when authorization is granted, so the sensors settle without another tap. The settings numbers are the one exception: changing a poll interval is admin work and does not arm it.
 
 Budgeting: the separate list poll costs 2 units per cycle (~576/day at 5 minutes); a full service — create, a couple of saves, thumbnail, go live, end, with generous fast-mode use — stays around 500–800 units, comfortably inside a 30% polling budget. All cadences are adjustable via the settings entities.
 

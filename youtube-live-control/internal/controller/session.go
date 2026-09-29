@@ -7,10 +7,9 @@ import (
 	"github.com/jacobgad/youtube-live-control/internal/youtube"
 )
 
-// Sentinel option labels in the two selects.
 const (
-	NewStreamLabel   = "New stream…"
-	KeepCurrentLabel = "Keep current"
+	newStreamLabel   = "New stream…"
+	keepCurrentLabel = "Keep current"
 )
 
 const displayTimeFormat = "2006-01-02 15:04"
@@ -23,14 +22,13 @@ const (
 	pendingEnd
 )
 
-// session is the single-broadcast working state behind the Home Assistant panel:
-// the option lists, the current selection, the volunteer's draft edits, and the
-// latest verified broadcast/stream status. Guarded by the controller's mutex.
+// session is guarded by Controller.mu; an empty selectedID means New stream… and a
+// zero fastUntil means the fast-refresh window is off.
 type session struct {
 	authorized bool
 	broadcasts []youtube.Broadcast
-	labels     []string // aligned with broadcasts
-	selectedID string   // "" selects NewStreamLabel
+	labels     []string
+	selectedID string
 	draftTitle string
 	draftStart time.Time
 	thumbnail  string
@@ -39,11 +37,9 @@ type session struct {
 	viewers    int
 	pending    pendingOp
 	tun        tunables
-	fastUntil  time.Time // zero while the fast-refresh window is off
+	fastUntil  time.Time
 }
 
-// armFast (re)starts the fast-refresh window; every panel interaction routes
-// through here so the switch is a fallback, not something to remember.
 func (s *session) armFast(now time.Time) {
 	s.fastUntil = now.Add(s.tun.fastWindow())
 }
@@ -52,7 +48,7 @@ func (s *session) fastActive(now time.Time) bool {
 	return !s.fastUntil.IsZero() && now.Before(s.fastUntil)
 }
 
-// fastRemainingMinutes rounds up so the countdown reads 5,4,…,1 and hits 0 exactly at expiry.
+// Rounded up so the countdown reads 5,4,…,1 and hits 0 exactly at expiry.
 func (s *session) fastRemainingMinutes(now time.Time) int {
 	if !s.fastActive(now) {
 		return 0
@@ -65,7 +61,6 @@ func (s *session) setBroadcasts(list []youtube.Broadcast) {
 	s.labels = broadcastLabels(list)
 }
 
-// apply merges one freshly read broadcast into the list (replacing or appending).
 func (s *session) apply(b youtube.Broadcast) {
 	for i := range s.broadcasts {
 		if s.broadcasts[i].ID == b.ID {
@@ -92,24 +87,23 @@ func (s *session) selected() *youtube.Broadcast {
 }
 
 func (s *session) selectOptions() []string {
-	return append([]string{NewStreamLabel}, s.labels...)
+	return append([]string{newStreamLabel}, s.labels...)
 }
 
 func (s *session) selectedLabel() string {
 	if s.selectedID == "" {
-		return NewStreamLabel
+		return newStreamLabel
 	}
 	for i := range s.broadcasts {
 		if s.broadcasts[i].ID == s.selectedID {
 			return s.labels[i]
 		}
 	}
-	return NewStreamLabel
+	return newStreamLabel
 }
 
-// idForLabel resolves a select option back to a broadcast id; "" with ok means new.
 func (s *session) idForLabel(label string) (id string, ok bool) {
-	if label == NewStreamLabel {
+	if label == newStreamLabel {
 		return "", true
 	}
 	for i, l := range s.labels {
@@ -121,11 +115,11 @@ func (s *session) idForLabel(label string) (id string, ok bool) {
 }
 
 func (s *session) thumbnailOptions() []string {
-	return append([]string{KeepCurrentLabel}, s.thumbFiles...)
+	return append([]string{keepCurrentLabel}, s.thumbFiles...)
 }
 
 func (s *session) validThumbnail(label string) bool {
-	if label == KeepCurrentLabel {
+	if label == keepCurrentLabel {
 		return true
 	}
 	for _, f := range s.thumbFiles {
@@ -136,10 +130,8 @@ func (s *session) validThumbnail(label string) bool {
 	return false
 }
 
-// loadDrafts re-seeds the editable fields from the selected broadcast so the panel
-// pre-fills on every selection change.
 func (s *session) loadDrafts() {
-	s.thumbnail = KeepCurrentLabel
+	s.thumbnail = keepCurrentLabel
 	s.stream = youtube.StreamStatus{}
 	s.viewers = 0
 	b := s.selected()
@@ -152,8 +144,6 @@ func (s *session) loadDrafts() {
 	s.draftStart = b.ScheduledStart
 }
 
-// broadcastLabels renders unique select options: "Mon 2 Jan 15:04 · Title", with a
-// numeric suffix when two broadcasts would otherwise collide.
 func broadcastLabels(list []youtube.Broadcast) []string {
 	labels := make([]string, 0, len(list))
 	seen := map[string]int{}
@@ -171,8 +161,6 @@ func broadcastLabels(list []youtube.Broadcast) []string {
 	return labels
 }
 
-// gates are the per-button availabilities derived from verified state, never from
-// anything this add-on merely intends to be true.
 type gates struct {
 	save   bool
 	create bool
@@ -180,9 +168,8 @@ type gates struct {
 	end    bool
 }
 
-// computeGates enforces the panel's safety rules: Go Live only while the encoder's
-// stream is active; End Stream only while live and after the stream has stopped
-// (streamStatus lags OBS by up to a minute, which is exactly the protection).
+// End requires the stream to have stopped: streamStatus lags OBS by up to a minute,
+// and that lag is the protection against ending a broadcast still receiving frames.
 func computeGates(authorized bool, b *youtube.Broadcast, stream youtube.StreamStatus, busy bool) gates {
 	if !authorized || busy {
 		return gates{}
@@ -201,8 +188,8 @@ func computeGates(authorized bool, b *youtube.Broadcast, stream youtube.StreamSt
 	}
 }
 
-// statusText renders the Broadcast status sensor, including the transitional states
-// and the "waiting for stream to stop" hint while streamStatus lags a stopped encoder.
+// While live, an active stream is the only thing keeping End Stream unavailable, so
+// that combination reads as the wait rather than as a plain "live".
 func statusText(b *youtube.Broadcast, stream youtube.StreamStatus, pending pendingOp) string {
 	switch pending {
 	case pendingGoLive:
@@ -213,14 +200,12 @@ func statusText(b *youtube.Broadcast, stream youtube.StreamStatus, pending pendi
 	if b == nil {
 		return "new (not created)"
 	}
-	if b.LifeCycleStatus == youtube.LifeLive && stream.Status == youtube.StreamActive && stream.Health == youtube.HealthNoData {
+	if b.LifeCycleStatus == youtube.LifeLive && stream.Status == youtube.StreamActive {
 		return "live (waiting for stream to stop)"
 	}
 	return b.LifeCycleStatus
 }
 
-// healthText renders the Stream health sensor: ingestion state until frames flow,
-// then YouTube's health verdict.
 func healthText(b *youtube.Broadcast, stream youtube.StreamStatus) string {
 	if b == nil {
 		return "none"
@@ -247,8 +232,7 @@ func formatWhen(t time.Time) string {
 	return t.Local().Format(displayTimeFormat)
 }
 
-// parseWhen accepts the published format, the same with a T, and full RFC 3339;
-// an empty string clears the draft. Times without a zone are local time.
+// Zone-less input is Home Assistant's local time, which is what a volunteer types.
 func parseWhen(raw string) (time.Time, error) {
 	if raw == "" {
 		return time.Time{}, nil

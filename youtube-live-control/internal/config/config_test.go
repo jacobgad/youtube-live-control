@@ -1,7 +1,9 @@
 package config
 
 import (
+	"fmt"
 	"log/slog"
+	"strings"
 	"testing"
 )
 
@@ -67,6 +69,15 @@ func TestMQTTFromEnv(t *testing.T) {
 	}
 	if _, err := MQTTFromEnv(func(string) string { return "" }); err == nil {
 		t.Fatal("missing host accepted")
+	}
+}
+
+func TestOptionsRenderingHidesClientSecret(t *testing.T) {
+	opts := Options{GoogleClientID: "id", GoogleClientSecret: "GOCSPX-hunter2", Privacy: "public"}
+	for _, rendered := range []string{opts.String(), opts.GoString(), fmt.Sprintf("%v %+v %#v", opts, opts, opts), opts.LogValue().String()} {
+		if strings.Contains(rendered, "hunter2") {
+			t.Fatalf("secret leaked: %s", rendered)
+		}
 	}
 }
 
