@@ -260,7 +260,7 @@ func (c *Controller) clearPending(ctx context.Context) {
 	c.mu.Lock()
 	c.session.pending = pendingNone
 	// Re-armed so post-transition health and viewers land without another tap.
-	c.session.armFast(c.now())
+	c.session.armFast(c.now(), c.opts.FastModeDuration)
 	c.mu.Unlock()
 	c.pub.update(ctx, c.snapshot)
 	c.kickStatusPoll()

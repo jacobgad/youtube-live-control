@@ -16,18 +16,10 @@ func (c *Controller) listLoop() {
 		select {
 		case <-c.lifetime.Done():
 			return
-		case <-time.After(c.listDelay()):
-			c.refreshList(c.lifetime)
-		case <-c.listKick:
+		case <-time.After(c.opts.ListPollInterval):
 			c.refreshList(c.lifetime)
 		}
 	}
-}
-
-func (c *Controller) listDelay() time.Duration {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.session.tun.listPoll()
 }
 
 func (c *Controller) statusLoop() {
@@ -49,12 +41,12 @@ func (c *Controller) statusDelay() time.Duration {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.session.fastActive(c.now()) {
-		return c.session.tun.fastPoll()
+		return c.opts.FastPollInterval
 	}
 	if b := c.session.selected(); b != nil && (b.LifeCycleStatus == youtube.LifeLive || b.LifeCycleStatus == youtube.LifeLiveStarting) {
-		return c.session.tun.livePoll()
+		return c.opts.LivePollInterval
 	}
-	return c.session.tun.idlePoll()
+	return c.opts.IdlePollInterval
 }
 
 // The service, not Home Assistant, owns the switch's OFF transition; publishing on
@@ -115,7 +107,7 @@ func (c *Controller) refreshList(ctx context.Context) {
 	}
 	c.mu.Unlock()
 
-	c.log.Debug("broadcast_list_refreshed", "count", len(merged), "thumbnails", len(thumbs))
+	c.log.Info("broadcast_list_refreshed", "upcoming", len(upcoming), "active", len(active), "thumbnails", len(thumbs))
 	c.pub.update(ctx, c.snapshot)
 }
 

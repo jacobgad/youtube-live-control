@@ -34,6 +34,7 @@ const (
 // Server is the ingress UI plus the OAuth callback listener.
 type Server struct {
 	auth *youtube.Auth
+	yt   *youtube.Client
 	opts config.Options
 	log  *slog.Logger
 
@@ -47,11 +48,11 @@ type stateEntry struct {
 }
 
 // New builds the server; Run starts it.
-func New(auth *youtube.Auth, opts config.Options, log *slog.Logger) *Server {
+func New(auth *youtube.Auth, yt *youtube.Client, opts config.Options, log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
-	return &Server{auth: auth, opts: opts, log: log, states: map[string]stateEntry{}}
+	return &Server{auth: auth, yt: yt, opts: opts, log: log, states: map[string]stateEntry{}}
 }
 
 // Run serves both listeners until ctx is cancelled.
@@ -102,6 +103,7 @@ func serve(srv *http.Server, name string, log *slog.Logger) error {
 type pageData struct {
 	Configured  bool
 	Authorized  bool
+	Channel     string
 	External    bool
 	RedirectURI string
 	AuthURL     string
@@ -119,6 +121,15 @@ func (s *Server) renderPage(w http.ResponseWriter, errMsg, notice string) {
 		Authorized: s.auth.Authorized(),
 		Error:      errMsg,
 		Notice:     notice,
+	}
+	if data.Authorized {
+		ctx, cancel := context.WithTimeout(context.Background(), exchangeTimeout)
+		defer cancel()
+		if channel, err := s.yt.MyChannel(ctx); err == nil {
+			data.Channel = channel.Title
+		} else {
+			s.log.Warn("channel_lookup_failed", "error", err.Error())
+		}
 	}
 	if data.Configured {
 		data.RedirectURI = s.redirectURI()
@@ -272,8 +283,9 @@ ol li { margin-bottom: 0.4rem; }
 </ol>
 {{else}}
 {{if .Authorized}}
-<p><span class="badge ok">Connected</span> — the add-on can manage the channel's live broadcasts.</p>
-<p>To switch accounts or repair access, connect again below.</p>
+<p><span class="badge ok">Connected</span>{{if .Channel}} to channel <strong>{{.Channel}}</strong>{{end}} — the add-on manages this channel's live broadcasts.</p>
+<p>Wrong channel? A Google account that manages several channels is asked to choose one during consent;
+connect again below and pick the channel (not the account) on Google's chooser.</p>
 {{else}}
 <p><span class="badge warn">Not connected</span> — consent once and the refresh token is kept in <code>/data</code>.</p>
 {{end}}

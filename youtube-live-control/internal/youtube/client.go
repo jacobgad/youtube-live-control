@@ -325,6 +325,33 @@ func (c *Client) DefaultStreamID(ctx context.Context) (string, error) {
 	return "", nil
 }
 
+// Channel identifies the YouTube channel the stored token acts on. Costs 1 quota unit.
+type Channel struct {
+	ID    string
+	Title string
+}
+
+// MyChannel returns the authenticated channel; with a Brand Account this is whichever
+// identity was picked on Google's account chooser, not the Google account itself.
+func (c *Client) MyChannel(ctx context.Context) (Channel, error) {
+	var out struct {
+		Items []struct {
+			ID      string `json:"id"`
+			Snippet struct {
+				Title string `json:"title"`
+			} `json:"snippet"`
+		} `json:"items"`
+	}
+	err := c.do(ctx, http.MethodGet, apiBase+"/channels", url.Values{"part": {"snippet"}, "mine": {"true"}}, nil, &out)
+	if err != nil {
+		return Channel{}, err
+	}
+	if len(out.Items) == 0 {
+		return Channel{}, errors.New("token is not associated with any YouTube channel")
+	}
+	return Channel{ID: out.Items[0].ID, Title: out.Items[0].Snippet.Title}, nil
+}
+
 // ConcurrentViewers reads the live viewer count off the video resource. Costs 1 quota unit.
 func (c *Client) ConcurrentViewers(ctx context.Context, videoID string) (int, error) {
 	var out struct {

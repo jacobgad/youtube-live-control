@@ -14,7 +14,6 @@ type Actions struct {
 	ScheduledEntered    func(raw string)
 	ThumbnailSelected   func(label string)
 	FastModeSwitched    func(on bool)
-	NumberEntered       func(object, raw string)
 	SavePressed         func()
 	CreatePressed       func()
 	GoLivePressed       func()
@@ -23,30 +22,15 @@ type Actions struct {
 }
 
 // Subscriptions are the topics the controller listens on.
-var Subscriptions = func() []string {
-	topics := make([]string, 0, 10+len(TunableSpecs))
-	topics = append(topics,
-		BroadcastSet, TitleSet, ScheduledSet, ThumbnailSet, FastModeSet,
-		SavePress, CreatePress, GoLivePress, EndPress,
-		HAStatusTopic,
-	)
-	for _, spec := range TunableSpecs {
-		topics = append(topics, NumberSet(spec.Object))
-	}
-	return topics
-}()
+var Subscriptions = []string{
+	BroadcastSet, TitleSet, ScheduledSet, ThumbnailSet, FastModeSet,
+	SavePress, CreatePress, GoLivePress, EndPress,
+	HAStatusTopic,
+}
 
 // NewRouter maps inbound topics to Actions.
 func NewRouter(actions Actions, log *slog.Logger) MessageHandler {
-	numberSets := map[string]string{}
-	for _, spec := range TunableSpecs {
-		numberSets[NumberSet(spec.Object)] = spec.Object
-	}
 	return func(topic string, payload []byte) {
-		if object, ok := numberSets[topic]; ok {
-			actions.NumberEntered(object, strings.TrimSpace(string(payload)))
-			return
-		}
 		switch topic {
 		case BroadcastSet:
 			actions.BroadcastSelected(strings.TrimSpace(string(payload)))

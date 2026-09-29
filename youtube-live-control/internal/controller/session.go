@@ -36,12 +36,12 @@ type session struct {
 	stream     youtube.StreamStatus
 	viewers    int
 	pending    pendingOp
-	tun        tunables
+	channel    string
 	fastUntil  time.Time
 }
 
-func (s *session) armFast(now time.Time) {
-	s.fastUntil = now.Add(s.tun.fastWindow())
+func (s *session) armFast(now time.Time, window time.Duration) {
+	s.fastUntil = now.Add(window)
 }
 
 func (s *session) fastActive(now time.Time) bool {

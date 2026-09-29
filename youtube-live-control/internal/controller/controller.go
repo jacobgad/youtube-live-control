@@ -26,33 +26,30 @@ const (
 
 // Deps are the controller's collaborators.
 type Deps struct {
-	YouTube      *youtube.Client
-	Auth         *youtube.Auth
-	MQTT         mqtt.Connection
-	Options      config.Options
-	SettingsPath string
-	Log          *slog.Logger
-	Origin       mqtt.Origin
-	Now          func() time.Time
+	YouTube *youtube.Client
+	Auth    *youtube.Auth
+	MQTT    mqtt.Connection
+	Options config.Options
+	Log     *slog.Logger
+	Origin  mqtt.Origin
+	Now     func() time.Time
 }
 
 // Controller is the add-on's long-lived core. Create it with New and drive it with Start/Stop.
 type Controller struct {
-	yt           *youtube.Client
-	auth         *youtube.Auth
-	mqtt         mqtt.Connection
-	opts         config.Options
-	settingsPath string
-	log          *slog.Logger
-	now          func() time.Time
-	pub          *publisher
+	yt   *youtube.Client
+	auth *youtube.Auth
+	mqtt mqtt.Connection
+	opts config.Options
+	log  *slog.Logger
+	now  func() time.Time
+	pub  *publisher
 
 	mu      sync.Mutex
 	session session
 
 	ops        chan queuedOp
 	statusKick chan struct{}
-	listKick   chan struct{}
 
 	// lifetime spans New to Stop. It is the one context this type owns: broker callbacks
 	// arrive with no context of their own and may fire before Start.
@@ -81,24 +78,21 @@ func New(deps Deps) *Controller {
 		now = time.Now
 	}
 	c := &Controller{
-		yt:           deps.YouTube,
-		auth:         deps.Auth,
-		mqtt:         deps.MQTT,
-		opts:         deps.Options,
-		settingsPath: deps.SettingsPath,
-		log:          log,
-		now:          now,
-		pub:          newPublisher(deps.MQTT, deps.Origin, log),
-		ops:          make(chan queuedOp, commandBuffer),
-		statusKick:   make(chan struct{}, 1),
-		listKick:     make(chan struct{}, 1),
-		opsDone:      make(chan struct{}),
-		listDone:     make(chan struct{}),
-		statDone:     make(chan struct{}),
+		yt:         deps.YouTube,
+		auth:       deps.Auth,
+		mqtt:       deps.MQTT,
+		opts:       deps.Options,
+		log:        log,
+		now:        now,
+		pub:        newPublisher(deps.MQTT, deps.Origin, log),
+		ops:        make(chan queuedOp, commandBuffer),
+		statusKick: make(chan struct{}, 1),
+		opsDone:    make(chan struct{}),
+		listDone:   make(chan struct{}),
+		statDone:   make(chan struct{}),
 	}
 	c.lifetime, c.endLife = context.WithCancel(context.Background())
 	c.session.thumbnail = keepCurrentLabel
-	c.session.tun = defaultTunables
 
 	c.mqtt.OnMessage(mqtt.NewRouter(mqtt.Actions{
 		BroadcastSelected: c.selectBroadcast,
@@ -106,7 +100,6 @@ func New(deps Deps) *Controller {
 		ScheduledEntered:  c.enterScheduled,
 		ThumbnailSelected: c.selectThumbnail,
 		FastModeSwitched:  c.switchFastMode,
-		NumberEntered:     c.setTunable,
 		SavePressed:       func() { c.pressed("save", c.save) },
 		CreatePressed:     func() { c.pressed("create", c.create) },
 		GoLivePressed:     func() { c.pressed("go_live", c.goLive) },
@@ -128,19 +121,10 @@ func (c *Controller) Start(ctx context.Context) error {
 	if !c.started.CompareAndSwap(false, true) {
 		return nil
 	}
-	tun := loadTunables(c.settingsPath, c.log)
 	c.mu.Lock()
 	c.session.authorized = c.auth.Authorized()
-	c.session.tun = tun
 	c.mu.Unlock()
-	c.log.Info("controller_started",
-		"authorized", c.auth.Authorized(),
-		"thumbnailsDir", c.opts.ThumbnailsDir,
-		"listPollMinutes", tun.ListPollMinutes,
-		"fastPollSeconds", tun.FastPollSeconds,
-		"fastModeMinutes", tun.FastModeMinutes,
-		"livePollSeconds", tun.LivePollSeconds,
-		"idlePollMinutes", tun.IdlePollMinutes)
+	c.log.Info("controller_started", "authorized", c.auth.Authorized(), "options", c.opts)
 
 	waitCtx, cancel := context.WithTimeout(ctx, mqttStartupWait)
 	err := c.mqtt.AwaitConnection(waitCtx)
@@ -152,6 +136,7 @@ func (c *Controller) Start(ctx context.Context) error {
 	}
 
 	if c.auth.Authorized() {
+		c.identifyChannel(ctx)
 		c.refreshList(ctx)
 	}
 
@@ -239,15 +224,32 @@ func (c *Controller) authChanged(ctx context.Context, authorized bool) {
 	c.mu.Lock()
 	c.session.authorized = authorized
 	if authorized {
-		c.session.armFast(c.now())
+		c.session.armFast(c.now(), c.opts.FastModeDuration)
+	} else {
+		c.session.channel = ""
 	}
 	c.mu.Unlock()
 	c.log.Info("authorization_changed", "authorized", authorized)
 	c.pub.update(ctx, c.snapshot)
 	if authorized {
+		c.identifyChannel(ctx)
 		c.refreshList(ctx)
 		c.kickStatusPoll()
 	}
+}
+
+// The channel is what Google's account chooser selected, which for a Brand Account is
+// not the Google account itself; surfacing it is what makes an empty list explainable.
+func (c *Controller) identifyChannel(ctx context.Context) {
+	channel, err := c.yt.MyChannel(ctx)
+	if err != nil {
+		c.log.Error("operation_failed", "operation", "identify_channel", "error", err)
+		return
+	}
+	c.mu.Lock()
+	c.session.channel = channel.Title
+	c.mu.Unlock()
+	c.log.Info("channel_connected", "channelId", channel.ID, "title", channel.Title)
 }
 
 func (c *Controller) snapshot() snapshot {
@@ -268,15 +270,8 @@ func (c *Controller) snapshot() snapshot {
 		viewers:          c.session.viewers,
 		fastMode:         c.session.fastActive(now),
 		fastRemaining:    c.session.fastRemainingMinutes(now),
-		tun:              c.session.tun,
+		channel:          c.session.channel,
 		gates:            computeGates(c.session.authorized, b, c.session.stream, c.session.pending != pendingNone),
-	}
-}
-
-func (c *Controller) kickListPoll() {
-	select {
-	case c.listKick <- struct{}{}:
-	default:
 	}
 }
 
@@ -284,7 +279,7 @@ func (c *Controller) kickListPoll() {
 // for streamStatus to catch up", the moment a fast poll is wanted most.
 func (c *Controller) pressed(name string, op func(context.Context)) {
 	c.mu.Lock()
-	c.session.armFast(c.now())
+	c.session.armFast(c.now(), c.opts.FastModeDuration)
 	c.mu.Unlock()
 	c.log.Debug("fast_mode_armed", "reason", name+"_press")
 	c.kickStatusPoll()
@@ -294,7 +289,7 @@ func (c *Controller) pressed(name string, op func(context.Context)) {
 func (c *Controller) switchFastMode(on bool) {
 	c.mu.Lock()
 	if on {
-		c.session.armFast(c.now())
+		c.session.armFast(c.now(), c.opts.FastModeDuration)
 	} else {
 		c.session.fastUntil = time.Time{}
 	}
@@ -303,33 +298,6 @@ func (c *Controller) switchFastMode(on bool) {
 	c.publishUpdate()
 	if on {
 		c.kickStatusPoll()
-	}
-}
-
-// Settings are admin work, not panel use, so they deliberately do not arm the fast window.
-func (c *Controller) setTunable(object, raw string) {
-	spec, ok := tunableSpec(object)
-	if !ok {
-		return
-	}
-	value, ok := parseIntPayload(raw)
-	if !ok || value < spec.Min || value > spec.Max {
-		c.log.Warn("setting_rejected", "setting", object, "payload", raw)
-		c.snapBack(mqtt.NumberState(object))
-		return
-	}
-	c.mu.Lock()
-	*tunableFields[object](&c.session.tun) = value
-	saved := c.session.tun
-	c.mu.Unlock()
-	c.log.Info("setting_changed", "setting", object, "value", value)
-	if err := saved.save(c.settingsPath); err != nil {
-		c.log.Error("settings_persist_failed", "path", c.settingsPath, "error", err.Error())
-	}
-	c.publishUpdate()
-	c.kickStatusPoll()
-	if object == "list_poll_minutes" {
-		c.kickListPoll()
 	}
 }
 
@@ -342,7 +310,7 @@ func (c *Controller) kickStatusPoll() {
 
 func (c *Controller) selectBroadcast(label string) {
 	c.mu.Lock()
-	c.session.armFast(c.now())
+	c.session.armFast(c.now(), c.opts.FastModeDuration)
 	id, ok := c.session.idForLabel(label)
 	if !ok {
 		c.mu.Unlock()
@@ -404,7 +372,7 @@ func (c *Controller) selectThumbnail(label string) {
 
 func (c *Controller) armFastMode(reason string) {
 	c.mu.Lock()
-	c.session.armFast(c.now())
+	c.session.armFast(c.now(), c.opts.FastModeDuration)
 	c.mu.Unlock()
 	c.log.Debug("fast_mode_armed", "reason", reason)
 	c.kickStatusPoll()

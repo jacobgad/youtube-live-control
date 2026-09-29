@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestParseOptionsDefaults(t *testing.T) {
@@ -17,6 +18,9 @@ func TestParseOptionsDefaults(t *testing.T) {
 	}
 	if opts.Privacy != "public" {
 		t.Fatalf("privacy default = %q", opts.Privacy)
+	}
+	if opts.ListPollInterval != 5*time.Minute || opts.FastPollInterval != 3*time.Second || opts.FastModeDuration != 5*time.Minute || opts.LivePollInterval != time.Minute || opts.IdlePollInterval != 10*time.Minute {
+		t.Fatalf("interval defaults = %+v", opts)
 	}
 	if opts.ThumbnailsDir != "/media/youtube-live-control" {
 		t.Fatalf("thumbnails default = %q", opts.ThumbnailsDir)
@@ -36,6 +40,16 @@ func TestParseOptionsEmptyClientAllowed(t *testing.T) {
 	}
 }
 
+func TestParseOptionsIntervals(t *testing.T) {
+	opts, err := ParseOptions([]byte(`{"list_poll_minutes":2,"fast_poll_seconds":5,"fast_mode_minutes":3,"live_poll_seconds":30,"idle_poll_minutes":15}`))
+	if err != nil {
+		t.Fatalf("ParseOptions: %v", err)
+	}
+	if opts.ListPollInterval != 2*time.Minute || opts.FastPollInterval != 5*time.Second || opts.FastModeDuration != 3*time.Minute || opts.LivePollInterval != 30*time.Second || opts.IdlePollInterval != 15*time.Minute {
+		t.Fatalf("intervals = %+v", opts)
+	}
+}
+
 func TestParseOptionsExternalURLTrimmed(t *testing.T) {
 	opts, err := ParseOptions([]byte(`{"external_url":" http://ha.local:8098/ "}`))
 	if err != nil {
@@ -49,6 +63,8 @@ func TestParseOptionsExternalURLTrimmed(t *testing.T) {
 func TestParseOptionsRejectsBadValues(t *testing.T) {
 	for name, payload := range map[string]string{
 		"privacy":   `{"privacy":"secret"}`,
+		"fast_low":  `{"fast_poll_seconds":0}`,
+		"live_high": `{"live_poll_seconds":601}`,
 		"log_level": `{"log_level":"loud"}`,
 		"not_json":  `{`,
 	} {

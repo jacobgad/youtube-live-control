@@ -59,8 +59,7 @@ func Messages(o Origin, broadcastOptions, thumbnailOptions []string) []Message {
 	if thumbnailOptions == nil {
 		thumbnailOptions = []string{}
 	}
-	msgs := make([]Message, 0, 14+len(TunableSpecs))
-	msgs = append(msgs,
+	return []Message{
 		commandEntity("select", "broadcast", "Broadcast", iconBroadcast, map[string]any{
 			"state_topic":   BroadcastState,
 			"command_topic": BroadcastSet,
@@ -101,29 +100,8 @@ func Messages(o Origin, broadcastOptions, thumbnailOptions []string) []Message {
 		button("go_live", "Go Live", iconGoLive, GoLivePress, GoLiveAvailability, o),
 		button("end_stream", "End Stream", iconEnd, EndPress, EndAvailability, o),
 		authSensor(o),
-	)
-	for _, spec := range TunableSpecs {
-		msgs = append(msgs, numberEntity(spec, o))
+		channelSensor(o),
 	}
-	return msgs
-}
-
-func numberEntity(spec NumberSpec, o Origin) Message {
-	m := base("number", spec.Object, spec.Name, spec.Icon, map[string]any{
-		"state_topic":         NumberState(spec.Object),
-		"command_topic":       NumberSet(spec.Object),
-		"min":                 spec.Min,
-		"max":                 spec.Max,
-		"step":                1,
-		"mode":                "box",
-		"unit_of_measurement": spec.Unit,
-		"optimistic":          false,
-		"retain":              false,
-		"qos":                 1,
-	}, o)
-	m.Payload["entity_category"] = "config"
-	m.Payload["availability"] = []map[string]any{controllerAvailability()}
-	return m
 }
 
 func commandEntity(component, object, name, icon string, fields map[string]any, o Origin) Message {
@@ -164,6 +142,14 @@ func authSensor(o Origin) Message {
 	m := base("sensor", "authorization", "Authorization", iconAuth, map[string]any{"state_topic": AuthState}, o)
 	m.Payload["entity_category"] = "diagnostic"
 	m.Payload["availability"] = []map[string]any{controllerAvailability()}
+	return m
+}
+
+func channelSensor(o Origin) Message {
+	m := base("sensor", "channel", "Channel", iconBroadcast, map[string]any{"state_topic": ChannelState}, o)
+	m.Payload["entity_category"] = "diagnostic"
+	m.Payload["availability"] = []map[string]any{controllerAvailability(), authAvailability()}
+	m.Payload["availability_mode"] = "all"
 	return m
 }
 

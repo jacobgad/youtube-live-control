@@ -26,7 +26,7 @@ type snapshot struct {
 	viewers          int
 	fastMode         bool
 	fastRemaining    int
-	tun              tunables
+	channel          string
 	gates            gates
 }
 
@@ -104,8 +104,12 @@ func render(snap snapshot, origin mqtt.Origin) []message {
 	if snap.fastMode {
 		fastMode = mqtt.PayloadOn
 	}
+	for _, topic := range mqtt.RetiredConfigTopics {
+		out = append(out, message{topic, ""})
+	}
 	out = append(out,
 		message{mqtt.AuthState, auth},
+		message{mqtt.ChannelState, snap.channel},
 		message{mqtt.BroadcastState, snap.selectedLabel},
 		message{mqtt.TitleState, snap.title},
 		message{mqtt.ScheduledState, snap.scheduled},
@@ -120,10 +124,6 @@ func render(snap snapshot, origin mqtt.Origin) []message {
 		message{mqtt.GoLiveAvailability, availability(snap.gates.goLive)},
 		message{mqtt.EndAvailability, availability(snap.gates.end)},
 	)
-	tun := snap.tun
-	for _, spec := range mqtt.TunableSpecs {
-		out = append(out, message{mqtt.NumberState(spec.Object), strconv.Itoa(*tunableFields[spec.Object](&tun))})
-	}
 	return out
 }
 

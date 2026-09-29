@@ -19,7 +19,7 @@ The add-on uses your own OAuth client — there is no shared cloud project and n
 1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), create a project and enable the **YouTube Data API v3**.
 2. Configure the **OAuth consent screen** (*Google Auth Platform → Audience* in newer consoles). User type **External** is fine. While the app is in **Testing**, only accounts listed under **Test users** may sign in and refresh tokens expire after **7 days** — add the channel's Google account there to get started, then press **Publish app** once it works so the token stops expiring. Publishing a sensitive-scope app without verification just adds a "Google hasn't verified this app" interstitial (*Advanced → Go to … (unsafe)*) on the consent screen; verification itself is not needed for a private single-channel tool.
 3. Create an **OAuth client ID** of type **Desktop app** and copy the client ID and secret into the add-on options. Nothing needs registering for this type: Google permits its `http://localhost` redirect out of the box, and Google's policy rejects plain-`http` redirects to anything *but* localhost — which is why a LAN address such as `http://homeassistant.local:8098/…` cannot be used.
-4. Restart the add-on, open its web UI and press **Connect Google account**. Consent to *Manage your YouTube account* (`youtube.force-ssl`).
+4. Restart the add-on, open its web UI and press **Connect Google account**. If the Google account manages more than one channel (Brand Accounts), Google shows a chooser — **pick the channel**, not the account: the connection acts on exactly that channel and only its broadcasts appear in the panel. Consent to *Manage your YouTube account* (`youtube.force-ssl`).
 5. Google then sends the browser to `http://localhost:8098/oauth/callback?…`, which shows a "can't connect" page unless that browser is running on the Home Assistant machine. That is expected — copy the whole URL from the address bar and paste it into the form on the web UI. The code in it completes the connection.
 
 If you have a public **https** hostname that forwards to the add-on's port 8098 (a reverse proxy or tunnel), set `external_url` to it, use a **Web application** client instead, and register `<external_url>/oauth/callback` as its authorized redirect URI; the redirect then completes on its own.
@@ -34,6 +34,11 @@ google_client_secret: "GOCSPX-…"
 external_url: ""
 privacy: public
 thumbnails_dir: /media/youtube-live-control
+list_poll_minutes: 5
+fast_poll_seconds: 3
+fast_mode_minutes: 5
+live_poll_seconds: 60
+idle_poll_minutes: 10
 log_level: info
 ```
 
@@ -43,21 +48,14 @@ log_level: info
 | `external_url` | unset | Public **https** base URL that forwards to the add-on's port 8098, e.g. `https://ylc.example.org`. When set, the OAuth redirect is `<external_url>/oauth/callback` and completes automatically; when unset the redirect is `http://localhost:8098/oauth/callback` and you paste the result. |
 | `privacy` | `public` | Privacy of broadcasts created by **Create** (`public` / `unlisted` / `private`). |
 | `thumbnails_dir` | `/media/youtube-live-control` | Folder of `.jpg`/`.png` files offered by the **Thumbnail** select. |
+| `list_poll_minutes` | `5` | 1–60. Broadcast list and thumbnail folder refresh. |
+| `fast_poll_seconds` | `3` | 1–30. Cadence while the fast-refresh window is armed. |
+| `fast_mode_minutes` | `5` | 1–60. How long each armed fast-refresh window lasts. |
+| `live_poll_seconds` | `60` | 15–600. Cadence while the selected broadcast is live. |
+| `idle_poll_minutes` | `10` | 1–60. Baseline cadence while a broadcast is selected but idle. |
 | `log_level` | `info` | `debug` / `info` / `warn` / `error` |
 
-The options hold only infrastructure that needs a restart. Everything behavioural — poll cadences and the fast-refresh window — is a number entity on the device (under *Configuration*), adjustable at runtime and persisted in `/data/settings.json`.
-
-### Settings entities
-
-| Entity | Default | Range | Meaning |
-| --- | --- | --- | --- |
-| **List poll interval** | 5 min | 1–60 | Broadcast list and thumbnail folder refresh. |
-| **Fast poll interval** | 3 s | 1–30 | Cadence while the fast-refresh window is armed. |
-| **Fast refresh window** | 5 min | 1–60 | How long each armed window lasts. |
-| **Live poll interval** | 60 s | 15–600 | Cadence while the selected broadcast is live. |
-| **Idle poll interval** | 10 min | 1–60 | Baseline cadence while a broadcast is selected but idle. |
-
-Changes apply immediately and survive restarts. Values are validated against the ranges above; out-of-range input snaps back.
+Configuration lives here; the MQTT device is purely for operating YouTube.
 
 ## The panel
 
@@ -79,6 +77,7 @@ One MQTT device, **YouTube Live** — a selector plus a detail panel, not one en
 | **Go Live** | button | Transitions to live. |
 | **End Stream** | button | Transitions to complete. |
 | **Authorization** | sensor (diagnostic) | `authorized` / `unauthorized`. |
+| **Channel** | sensor (diagnostic) | Title of the YouTube channel the connection acts on. |
 
 Invalid input (a malformed date, a title over 100 characters, an unknown option) is rejected and the field snaps back to the retained state.
 
@@ -102,9 +101,9 @@ The YouTube Data API allows 10,000 units/day by default. Reads cost 1; insert/up
 | Live | broadcast is on air | 60 s | ~180 units/hour |
 | Fast | **Fast refresh** armed | 3 s | ~40 units/minute, window capped at 5 min |
 
-The fast window is armed automatically by **any** interaction with the panel — changing the selection, typing a title, pressing a button (even a refused press: tapping End Stream while YouTube still reports the stream active is exactly the moment you want a fast poll). Each interaction restarts the timer, and the add-on switches it off itself when the window expires — so a dashboard left on Sunday's selection cannot drain Monday's quota. It also self-arms when a Go Live / End Stream transition finishes and when authorization is granted, so the sensors settle without another tap. The settings numbers are the one exception: changing a poll interval is admin work and does not arm it.
+The fast window is armed automatically by **any** interaction with the panel — changing the selection, typing a title, pressing a button (even a refused press: tapping End Stream while YouTube still reports the stream active is exactly the moment you want a fast poll). Each interaction restarts the timer, and the add-on switches it off itself when the window expires — so a dashboard left on Sunday's selection cannot drain Monday's quota. It also self-arms when a Go Live / End Stream transition finishes and when authorization is granted, so the sensors settle without another tap.
 
-Budgeting: the separate list poll costs 2 units per cycle (~576/day at 5 minutes); a full service — create, a couple of saves, thumbnail, go live, end, with generous fast-mode use — stays around 500–800 units, comfortably inside a 30% polling budget. All cadences are adjustable via the settings entities.
+Budgeting: the separate list poll costs 2 units per cycle (~576/day at 5 minutes); a full service — create, a couple of saves, thumbnail, go live, end, with generous fast-mode use — stays around 500–800 units, comfortably inside a 30% polling budget. All cadences are add-on options.
 
 ## Thumbnails
 
@@ -115,6 +114,7 @@ Put `.jpg`/`.png` files (max 2 MB, ideally 1280×720) into `thumbnails_dir` (def
 | Symptom | What to check |
 | --- | --- |
 | Entities unavailable, Authorization `unauthorized` | Consent hasn't been given or was revoked. Open the web UI and connect. |
+| Broadcast select only shows *New stream…* although a stream is scheduled | The connection is to a different channel than the one holding the broadcast — check the **Channel** sensor / the web UI's "Connected to channel …". Reconnect and pick the right channel on Google's account chooser. Also confirm the log line `broadcast_list_refreshed upcoming=N`. |
 | `Error 400: invalid_request` / "doesn't comply with Google's OAuth 2.0 policy" | The redirect URI is plain `http` to a non-localhost address. Leave `external_url` unset (localhost redirect + paste), or set it to an **https** URL. |
 | `redirect_uri_mismatch` from Google | With `external_url` set, the OAuth client must be a **Web application** with exactly `<external_url>/oauth/callback` registered. With it unset, use a **Desktop app** client. |
 | Browser shows "can't connect" to `localhost:8098` after consenting | Expected when `external_url` is unset — the code is in the address bar. Copy the whole URL and paste it into the form on the web UI. |

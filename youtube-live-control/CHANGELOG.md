@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.0
+
+- **Channel selection for accounts that manage several YouTube channels.** Consent now always shows Google's account chooser (`prompt=select_account`), so a Brand Account channel can be picked explicitly; a scheduled stream that didn't appear in the Broadcast select was almost certainly on a different channel than the one connected. The connected channel is shown in the web UI and as a **Channel** diagnostic sensor, and logged as `channel_connected`.
+- **Polling intervals move back to the add-on options** (`list_poll_minutes`, `fast_poll_seconds`, `fast_mode_minutes`, `live_poll_seconds`, `idle_poll_minutes`). The MQTT device is now purely for operating YouTube; the settings number entities and `/data/settings.json` are gone, and their stale discovery configs are cleared on start.
+- `broadcast_list_refreshed` is logged at info level with upcoming/active counts.
+
 ## 1.0.2
 
 - **Fix Google refusing consent with `Error 400: invalid_request` ("doesn't comply with Google's OAuth 2.0 policy").** Google only allows plain-`http` redirect URIs to localhost; the previous default pointed at the Home Assistant host's LAN address. The default redirect is now `http://localhost:8098/oauth/callback` with a **Desktop app** OAuth client (no redirect registration needed), and the web UI walks through pasting the resulting URL back. `external_url` remains for installations with a public https hostname in front of port 8098, where the redirect completes automatically.

@@ -121,8 +121,9 @@ func (a *Auth) Authorized() bool {
 	return a.refresh != ""
 }
 
-// AuthURL builds the Google consent URL. access_type=offline with prompt=consent
-// guarantees a refresh token on every completed consent, not just the first.
+// AuthURL builds the Google consent URL. prompt=consent guarantees a refresh token on
+// every completed consent; select_account forces the chooser so an account managing
+// several channels (Brand Accounts) always picks which channel the token acts on.
 func (a *Auth) AuthURL(redirectURI, state string) string {
 	q := url.Values{
 		"client_id":     {a.clientID},
@@ -130,7 +131,7 @@ func (a *Auth) AuthURL(redirectURI, state string) string {
 		"response_type": {"code"},
 		"scope":         {Scope},
 		"access_type":   {"offline"},
-		"prompt":        {"consent"},
+		"prompt":        {"select_account consent"},
 		"state":         {state},
 	}
 	return authEndpoint + "?" + q.Encode()

@@ -16,23 +16,26 @@ import (
 	"time"
 )
 
-// Options are the validated add-on options: infrastructure that needs a restart.
-// Runtime behaviour (poll tiers, fast window) is tuned through the add-on's own
-// MQTT number entities instead and persists in /data.
+// Options are the validated add-on options.
 type Options struct {
 	GoogleClientID     string
 	GoogleClientSecret string
 	ExternalURL        string
 	Privacy            string
 	ThumbnailsDir      string
+	ListPollInterval   time.Duration
+	FastPollInterval   time.Duration
+	FastModeDuration   time.Duration
+	LivePollInterval   time.Duration
+	IdlePollInterval   time.Duration
 	LogLevel           slog.Level
 }
 
 // String renders the options without the client secret, so formatting an Options
 // value (or any struct containing one) can never leak the credential into logs.
 func (o Options) String() string {
-	return fmt.Sprintf("Options{clientID=%s externalURL=%s privacy=%s thumbnailsDir=%s logLevel=%s}",
-		o.GoogleClientID, o.ExternalURL, o.Privacy, o.ThumbnailsDir, o.LogLevel)
+	return fmt.Sprintf("Options{clientID=%s externalURL=%s privacy=%s thumbnailsDir=%s listPoll=%s fastPoll=%s fastMode=%s livePoll=%s idlePoll=%s logLevel=%s}",
+		o.GoogleClientID, o.ExternalURL, o.Privacy, o.ThumbnailsDir, o.ListPollInterval, o.FastPollInterval, o.FastModeDuration, o.LivePollInterval, o.IdlePollInterval, o.LogLevel)
 }
 
 // GoString mirrors String for %#v, which bypasses Stringer.
@@ -45,6 +48,11 @@ func (o Options) LogValue() slog.Value {
 		slog.String("externalURL", o.ExternalURL),
 		slog.String("privacy", o.Privacy),
 		slog.String("thumbnailsDir", o.ThumbnailsDir),
+		slog.Duration("listPoll", o.ListPollInterval),
+		slog.Duration("fastPoll", o.FastPollInterval),
+		slog.Duration("fastMode", o.FastModeDuration),
+		slog.Duration("livePoll", o.LivePollInterval),
+		slog.Duration("idlePoll", o.IdlePollInterval),
 		slog.String("logLevel", o.LogLevel.String()),
 	)
 }
@@ -79,10 +87,9 @@ func (m MQTT) LogValue() slog.Value {
 
 // Config is everything the binary needs to start.
 type Config struct {
-	Options      Options
-	MQTT         MQTT
-	TokenPath    string
-	SettingsPath string
+	Options   Options
+	MQTT      MQTT
+	TokenPath string
 }
 
 type rawOptions struct {
@@ -91,7 +98,21 @@ type rawOptions struct {
 	ExternalURL        *string `json:"external_url"`
 	Privacy            *string `json:"privacy"`
 	ThumbnailsDir      *string `json:"thumbnails_dir"`
+	ListPollMinutes    *int    `json:"list_poll_minutes"`
+	FastPollSeconds    *int    `json:"fast_poll_seconds"`
+	FastModeMinutes    *int    `json:"fast_mode_minutes"`
+	LivePollSeconds    *int    `json:"live_poll_seconds"`
+	IdlePollMinutes    *int    `json:"idle_poll_minutes"`
 	LogLevel           *string `json:"log_level"`
+}
+
+type intervalOption struct {
+	name  string
+	raw   *int
+	min   int
+	max   int
+	unit  time.Duration
+	value *time.Duration
 }
 
 // ParseOptions validates the JSON contents of options.json and applies defaults.
@@ -103,9 +124,14 @@ func ParseOptions(data []byte) (Options, error) {
 		return Options{}, fmt.Errorf("options are not valid JSON: %w", err)
 	}
 	opts := Options{
-		Privacy:       "public",
-		ThumbnailsDir: "/media/youtube-live-control",
-		LogLevel:      slog.LevelInfo,
+		Privacy:          "public",
+		ThumbnailsDir:    "/media/youtube-live-control",
+		ListPollInterval: 5 * time.Minute,
+		FastPollInterval: 3 * time.Second,
+		FastModeDuration: 5 * time.Minute,
+		LivePollInterval: time.Minute,
+		IdlePollInterval: 10 * time.Minute,
+		LogLevel:         slog.LevelInfo,
 	}
 	if raw.GoogleClientID != nil {
 		opts.GoogleClientID = strings.TrimSpace(*raw.GoogleClientID)
@@ -126,6 +152,22 @@ func ParseOptions(data []byte) (Options, error) {
 	}
 	if raw.ThumbnailsDir != nil && strings.TrimSpace(*raw.ThumbnailsDir) != "" {
 		opts.ThumbnailsDir = strings.TrimSpace(*raw.ThumbnailsDir)
+	}
+	intervals := []intervalOption{
+		{"list_poll_minutes", raw.ListPollMinutes, 1, 60, time.Minute, &opts.ListPollInterval},
+		{"fast_poll_seconds", raw.FastPollSeconds, 1, 30, time.Second, &opts.FastPollInterval},
+		{"fast_mode_minutes", raw.FastModeMinutes, 1, 60, time.Minute, &opts.FastModeDuration},
+		{"live_poll_seconds", raw.LivePollSeconds, 15, 600, time.Second, &opts.LivePollInterval},
+		{"idle_poll_minutes", raw.IdlePollMinutes, 1, 60, time.Minute, &opts.IdlePollInterval},
+	}
+	for _, opt := range intervals {
+		if opt.raw == nil {
+			continue
+		}
+		if v := *opt.raw; v < opt.min || v > opt.max {
+			return Options{}, fmt.Errorf("%s must be between %d and %d", opt.name, opt.min, opt.max)
+		}
+		*opt.value = time.Duration(*opt.raw) * opt.unit
 	}
 	if raw.LogLevel != nil {
 		if err := opts.LogLevel.UnmarshalText([]byte(*raw.LogLevel)); err != nil {
@@ -213,12 +255,7 @@ func Load(ctx context.Context) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	return Config{
-		Options:      opts,
-		MQTT:         mqtt,
-		TokenPath:    envOr("YLC_TOKEN_PATH", "/data/token.json"),
-		SettingsPath: envOr("YLC_SETTINGS_PATH", "/data/settings.json"),
-	}, nil
+	return Config{Options: opts, MQTT: mqtt, TokenPath: envOr("YLC_TOKEN_PATH", "/data/token.json")}, nil
 }
 
 func envOr(key, fallback string) string {

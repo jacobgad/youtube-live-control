@@ -25,7 +25,6 @@ func TestRouterDispatch(t *testing.T) {
 				got = append(got, "fast:off")
 			}
 		},
-		NumberEntered:       func(object, raw string) { got = append(got, "number:"+object+"="+raw) },
 		SavePressed:         record("save"),
 		CreatePressed:       record("create"),
 		GoLivePressed:       record("go_live"),
@@ -40,7 +39,6 @@ func TestRouterDispatch(t *testing.T) {
 	router(FastModeSet, []byte("ON"))
 	router(FastModeSet, []byte(" off "))
 	router(FastModeSet, []byte("maybe"))
-	router(NumberSet("fast_poll_seconds"), []byte(" 5 "))
 	router(SavePress, []byte(PayloadPress))
 	router(CreatePress, []byte(PayloadPress))
 	router(GoLivePress, []byte(PayloadPress))
@@ -55,7 +53,6 @@ func TestRouterDispatch(t *testing.T) {
 		"scheduled:2025-01-05 09:30",
 		"thumbnail:cover.jpg",
 		"fast:on", "fast:off",
-		"number:fast_poll_seconds=5",
 		"save", "create", "go_live", "end",
 		"ha_online",
 	}

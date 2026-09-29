@@ -20,6 +20,7 @@ const (
 
 	ControllerAvailability = Prefix + "/controller/availability"
 	AuthState              = Prefix + "/auth/state"
+	ChannelState           = Prefix + "/channel/state"
 
 	BroadcastState = Prefix + "/broadcast/state"
 	BroadcastSet   = Prefix + "/broadcast/set"
@@ -54,30 +55,12 @@ func HADiscoveryTopic(component, objectID string) string {
 	return HADiscoveryPrefix + "/" + component + "/" + NodeID + "/" + objectID + "/config"
 }
 
-// NumberSpec describes one runtime-tunable number entity; the range doubles as
-// command validation on the controller side.
-type NumberSpec struct {
-	Object string
-	Name   string
-	Unit   string
-	Icon   string
-	Min    int
-	Max    int
+// RetiredConfigTopics are discovery configs published by earlier versions and cleared
+// on every full republish so their entities do not linger in Home Assistant.
+var RetiredConfigTopics = []string{
+	HADiscoveryTopic("number", "list_poll_minutes"),
+	HADiscoveryTopic("number", "fast_poll_seconds"),
+	HADiscoveryTopic("number", "fast_mode_minutes"),
+	HADiscoveryTopic("number", "live_poll_seconds"),
+	HADiscoveryTopic("number", "idle_poll_minutes"),
 }
-
-// TunableSpecs are the runtime settings exposed as configuration number entities,
-// adjustable from Home Assistant without a restart; the add-on options keep only
-// infrastructure that genuinely needs one (OAuth client, URLs, directories).
-var TunableSpecs = []NumberSpec{
-	{Object: "list_poll_minutes", Name: "List poll interval", Unit: "min", Icon: "mdi:update", Min: 1, Max: 60},
-	{Object: "fast_poll_seconds", Name: "Fast poll interval", Unit: "s", Icon: "mdi:speedometer", Min: 1, Max: 30},
-	{Object: "fast_mode_minutes", Name: "Fast refresh window", Unit: "min", Icon: "mdi:timer-cog-outline", Min: 1, Max: 60},
-	{Object: "live_poll_seconds", Name: "Live poll interval", Unit: "s", Icon: "mdi:pulse", Min: 15, Max: 600},
-	{Object: "idle_poll_minutes", Name: "Idle poll interval", Unit: "min", Icon: "mdi:sleep", Min: 1, Max: 60},
-}
-
-// NumberState builds the retained state topic for a tunable.
-func NumberState(object string) string { return Prefix + "/" + object + "/state" }
-
-// NumberSet builds the command topic for a tunable.
-func NumberSet(object string) string { return Prefix + "/" + object + "/set" }

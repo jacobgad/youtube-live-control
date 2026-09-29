@@ -63,18 +63,18 @@ func run() error {
 		return err
 	}
 
+	yt := youtube.NewClient(auth)
 	ctrl := controller.New(controller.Deps{
-		YouTube:      youtube.NewClient(auth),
-		Auth:         auth,
-		MQTT:         conn,
-		Options:      cfg.Options,
-		SettingsPath: cfg.SettingsPath,
-		Log:          log,
-		Origin:       mqtt.Origin{Version: version, SupportURL: supportURL},
+		YouTube: yt,
+		Auth:    auth,
+		MQTT:    conn,
+		Options: cfg.Options,
+		Log:     log,
+		Origin:  mqtt.Origin{Version: version, SupportURL: supportURL},
 	})
 
 	webErr := make(chan error, 1)
-	go func() { webErr <- web.New(auth, cfg.Options, log).Run(ctx) }()
+	go func() { webErr <- web.New(auth, yt, cfg.Options, log).Run(ctx) }()
 
 	if err := ctrl.Start(ctx); err != nil {
 		log.Error("startup_failed", "error", err.Error())

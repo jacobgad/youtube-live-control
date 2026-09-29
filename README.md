@@ -20,7 +20,7 @@ Home Assistant ──MQTT──▶ Mosquitto ◀──MQTT── YouTube Live Co
 - **Transitions are gated on reality.** Go Live requires the encoder's `streamStatus` to be `active`; End Stream requires being live with the stream no longer active. `enableAutoStart`/`enableAutoStop` are always written as `false`, so only the buttons ever transition a broadcast. While `streamStatus` lags a stopped encoder, the status sensor shows `live (waiting for stream to stop)`.
 - **Nothing transitions on its own.** State is retained, commands are not, retained replays are dropped: restarts of the add-on, the broker or Home Assistant republish state but never start or stop a broadcast.
 - **Quota-aware, presence-driven polling.** Three tiers, all only while a broadcast is selected: a 10-minute idle baseline, a 60-second cadence while live, and a 3-second fast window (~40 units/min, capped at 5 minutes) armed by any panel interaction — including refused button presses — or by the **Fast refresh** switch, which the add-on itself turns off on expiry. A countdown sensor shows minutes remaining.
-- **Nothing user-facing is hard-coded.** Poll cadences and the fast window are configuration number entities, applied at runtime and persisted in `/data/settings.json`; the add-on options carry only restart-scoped infrastructure (OAuth client, URLs, directories).
+- **Configuration and control are separate.** Poll cadences and the fast window are add-on options; the MQTT device carries only what operates YouTube.
 
 Single static Go binary on plain Alpine. The only web surface is the ingress OAuth console plus a `:8098` redirect endpoint. Google's OAuth policy only allows plain-`http` redirects to localhost, so by default consent uses a **Desktop app** client with a `http://localhost:8098` redirect and the volunteer pastes the resulting URL back into the console; an https `external_url` in front of `:8098` makes the redirect complete on its own.
 
@@ -32,6 +32,7 @@ Prefix `ylc/`. State is retained; commands (`…/set`, `…/press`) are not, and
 | --- | --- |
 | `ylc/controller/availability` | controller online/offline; also the Last Will |
 | `ylc/auth/state` | `authorized` / `unauthorized`; command entities list it as an availability |
+| `ylc/channel/state` | title of the connected YouTube channel |
 | `ylc/broadcast/{state,set}` | Broadcast select (labels; *New stream…* sentinel) |
 | `ylc/title/{state,set}` | Title text |
 | `ylc/scheduled_start/{state,set}` | Scheduled start text, `YYYY-MM-DD HH:MM` local |
@@ -41,7 +42,6 @@ Prefix `ylc/`. State is retained; commands (`…/set`, `…/press`) are not, and
 | `ylc/{stream_health,broadcast_status,viewers}/state` | sensors |
 | `ylc/{save,create,go_live,end_stream}/press` | buttons |
 | `ylc/{save,create,go_live,end_stream}/availability` | per-button gates |
-| `ylc/<setting>/{state,set}` | settings numbers: `list_poll_minutes`, `fast_poll_seconds`, `fast_mode_minutes`, `live_poll_seconds`, `idle_poll_minutes` |
 
 Home Assistant device identifier `ylc:controller`; entity unique IDs `youtube_live_control_<object>`; discovery configs under `homeassistant/<component>/youtube_live_control/<object>/config` (republished when select options change).
 
@@ -67,4 +67,4 @@ golangci-lint run
 docker build --build-arg BUILD_VERSION=dev .
 ```
 
-Run outside the Supervisor by setting `MQTT_HOST` (plus `MQTT_PORT`/`MQTT_USERNAME`/`MQTT_PASSWORD`/`MQTT_SSL`), `YLC_OPTIONS_PATH` to a local options JSON, `YLC_TOKEN_PATH` for the token file and `YLC_SETTINGS_PATH` for the runtime settings file.
+Run outside the Supervisor by setting `MQTT_HOST` (plus `MQTT_PORT`/`MQTT_USERNAME`/`MQTT_PASSWORD`/`MQTT_SSL`), `YLC_OPTIONS_PATH` to a local options JSON, `YLC_TOKEN_PATH` for the token file.
