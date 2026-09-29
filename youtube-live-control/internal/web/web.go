@@ -20,8 +20,8 @@ import (
 	"github.com/jacobgad/youtube-live-control/internal/youtube"
 )
 
-// Both ports must match config.yaml (ingress_port and ports); the callback port is
-// exposed on the host because Google must be able to redirect the browser to it.
+// 8099 is the Supervisor's default ingress_port (the add-on linter forbids restating
+// it in config.yaml); 8098 must match config.yaml's ports so Google can reach it.
 const (
 	ingressPort  = 8099
 	callbackPort = 8098
