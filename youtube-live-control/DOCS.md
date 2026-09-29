@@ -7,7 +7,7 @@ Runs a channel's scheduled YouTube live broadcasts from Home Assistant. The inte
 1. **Settings → Add-ons → Add-on Store → ⋮ → Repositories**, add this repository's URL.
 2. Install **YouTube Live Control**.
 3. Create a Google OAuth client (below), enter it on the **Configuration** tab, **Start** the add-on.
-4. Open the add-on's web UI (sidebar **YouTube Live**) and connect the channel's Google account once.
+4. Open the add-on's web UI — the **Open Web UI** button on the add-on's Info tab, or **YouTube Live** in the sidebar once *Show in sidebar* is on — and connect the channel's Google account once.
 5. Entities appear under **Settings → Devices & services → MQTT** as one **YouTube Live** device.
 
 Requires the **Mosquitto broker** add-on and the **MQTT integration**. Broker credentials are read from the Supervisor; there is nothing to enter.
@@ -18,9 +18,11 @@ The add-on uses your own OAuth client — there is no shared cloud project and n
 
 1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), create a project and enable the **YouTube Data API v3**.
 2. Configure the **OAuth consent screen** (External is fine; add the channel's Google account as a test user, or publish the app so the refresh token doesn't expire after 7 days).
-3. Create an **OAuth client ID** of type **Web application** and copy the client ID and secret into the add-on options.
-4. Add the **authorized redirect URI** the web UI shows you — by default `http://<your-ha-host>:8098/oauth/callback` (port 8098 is exposed by the add-on for exactly this).
-5. In the web UI press **Connect Google account** and consent to *Manage your YouTube account* (`youtube.force-ssl`). If the redirect page cannot load, paste the URL from the address bar into the fallback form; the code is in it.
+3. Create an **OAuth client ID** of type **Desktop app** and copy the client ID and secret into the add-on options. Nothing needs registering for this type: Google permits its `http://localhost` redirect out of the box, and Google's policy rejects plain-`http` redirects to anything *but* localhost — which is why a LAN address such as `http://homeassistant.local:8098/…` cannot be used.
+4. Restart the add-on, open its web UI and press **Connect Google account**. Consent to *Manage your YouTube account* (`youtube.force-ssl`).
+5. Google then sends the browser to `http://localhost:8098/oauth/callback?…`, which shows a "can't connect" page unless that browser is running on the Home Assistant machine. That is expected — copy the whole URL from the address bar and paste it into the form on the web UI. The code in it completes the connection.
+
+If you have a public **https** hostname that forwards to the add-on's port 8098 (a reverse proxy or tunnel), set `external_url` to it, use a **Web application** client instead, and register `<external_url>/oauth/callback` as its authorized redirect URI; the redirect then completes on its own.
 
 The refresh token is stored in `/data/token.json` and survives restarts and updates. Consent is needed once; if Google ever revokes the token the **Authorization** sensor flips to `unauthorized` and the web UI asks you to reconnect.
 
@@ -38,7 +40,7 @@ log_level: info
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `google_client_id` / `google_client_secret` | required | Your OAuth client. |
-| `external_url` | derived | Base URL for the OAuth redirect when the auto-detected host is wrong, e.g. `http://192.168.1.10`. `/oauth/callback` and port 8098 are appended/expected. |
+| `external_url` | unset | Public **https** base URL that forwards to the add-on's port 8098, e.g. `https://ylc.example.org`. When set, the OAuth redirect is `<external_url>/oauth/callback` and completes automatically; when unset the redirect is `http://localhost:8098/oauth/callback` and you paste the result. |
 | `privacy` | `public` | Privacy of broadcasts created by **Create** (`public` / `unlisted` / `private`). |
 | `thumbnails_dir` | `/media/youtube-live-control` | Folder of `.jpg`/`.png` files offered by the **Thumbnail** select. |
 | `log_level` | `info` | `debug` / `info` / `warn` / `error` |
@@ -113,8 +115,9 @@ Put `.jpg`/`.png` files (max 2 MB, ideally 1280×720) into `thumbnails_dir` (def
 | Symptom | What to check |
 | --- | --- |
 | Entities unavailable, Authorization `unauthorized` | Consent hasn't been given or was revoked. Open the web UI and connect. |
-| `redirect_uri_mismatch` from Google | The redirect URI on the OAuth client must exactly match the one shown in the web UI. Set `external_url` if the auto-detected host is wrong. |
-| Google page says the redirect failed to load | Port 8098 isn't reachable from the browser. The code is still in the address bar — paste the full URL into the web UI's fallback form. |
+| `Error 400: invalid_request` / "doesn't comply with Google's OAuth 2.0 policy" | The redirect URI is plain `http` to a non-localhost address. Leave `external_url` unset (localhost redirect + paste), or set it to an **https** URL. |
+| `redirect_uri_mismatch` from Google | With `external_url` set, the OAuth client must be a **Web application** with exactly `<external_url>/oauth/callback` registered. With it unset, use a **Desktop app** client. |
+| Browser shows "can't connect" to `localhost:8098` after consenting | Expected when `external_url` is unset — the code is in the address bar. Copy the whole URL and paste it into the form on the web UI. |
 | `access_denied` / app not verified | Add the account as a test user on the consent screen, or publish the app. |
 | Go Live stays unavailable | The stream isn't `active`: OBS isn't streaming, or the broadcast has no bound stream (`Stream health: no stream bound`). Selecting the broadcast and pressing Create/Save re-binds only on create; bind Studio-made broadcasts to your stream key in Studio. |
 | End Stream stays unavailable after stopping OBS | Expected for up to a minute — `streamStatus` lags. Tap End Stream once (or flip **Fast refresh** on): the refused press arms the fast poll and the button enables as soon as YouTube reports the stream stopped. |

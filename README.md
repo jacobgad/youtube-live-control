@@ -22,7 +22,7 @@ Home Assistant ──MQTT──▶ Mosquitto ◀──MQTT── YouTube Live Co
 - **Quota-aware, presence-driven polling.** Three tiers, all only while a broadcast is selected: a 10-minute idle baseline, a 60-second cadence while live, and a 3-second fast window (~40 units/min, capped at 5 minutes) armed by any panel interaction — including refused button presses — or by the **Fast refresh** switch, which the add-on itself turns off on expiry. A countdown sensor shows minutes remaining.
 - **Nothing user-facing is hard-coded.** Poll cadences and the fast window are configuration number entities, applied at runtime and persisted in `/data/settings.json`; the add-on options carry only restart-scoped infrastructure (OAuth client, URLs, directories).
 
-Single static Go binary on plain Alpine. The only web surface is the ingress OAuth console plus the `:8098` redirect endpoint Google needs.
+Single static Go binary on plain Alpine. The only web surface is the ingress OAuth console plus a `:8098` redirect endpoint. Google's OAuth policy only allows plain-`http` redirects to localhost, so by default consent uses a **Desktop app** client with a `http://localhost:8098` redirect and the volunteer pastes the resulting URL back into the console; an https `external_url` in front of `:8098` makes the redirect complete on its own.
 
 ## MQTT contract
 

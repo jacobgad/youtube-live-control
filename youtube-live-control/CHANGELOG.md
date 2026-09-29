@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.2
+
+- **Fix Google refusing consent with `Error 400: invalid_request` ("doesn't comply with Google's OAuth 2.0 policy").** Google only allows plain-`http` redirect URIs to localhost; the previous default pointed at the Home Assistant host's LAN address. The default redirect is now `http://localhost:8098/oauth/callback` with a **Desktop app** OAuth client (no redirect registration needed), and the web UI walks through pasting the resulting URL back. `external_url` remains for installations with a public https hostname in front of port 8098, where the redirect completes automatically.
+- Web UI and docs say where the web UI is (the add-on's **Open Web UI** button / sidebar entry).
+
 ## 1.0.1
 
 - **Save no longer resets other broadcast settings.** The update echoed only the fields the add-on knows about, and YouTube overwrites every mutable property in a part it receives — so DVR, latency, embed and caption settings on a Studio-created broadcast were reset on every Save. The broadcast is now written back exactly as fetched with only the title, scheduled start, privacy and the (always-false) auto start/stop flags changed.

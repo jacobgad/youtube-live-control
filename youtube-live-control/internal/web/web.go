@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"html/template"
 	"log/slog"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -103,17 +102,18 @@ func serve(srv *http.Server, name string, log *slog.Logger) error {
 type pageData struct {
 	Configured  bool
 	Authorized  bool
+	External    bool
 	RedirectURI string
 	AuthURL     string
 	Error       string
 	Notice      string
 }
 
-func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {
-	s.renderPage(w, r, "", "")
+func (s *Server) handleHome(w http.ResponseWriter, _ *http.Request) {
+	s.renderPage(w, "", "")
 }
 
-func (s *Server) renderPage(w http.ResponseWriter, r *http.Request, errMsg, notice string) {
+func (s *Server) renderPage(w http.ResponseWriter, errMsg, notice string) {
 	data := pageData{
 		Configured: s.auth.Configured(),
 		Authorized: s.auth.Authorized(),
@@ -121,7 +121,8 @@ func (s *Server) renderPage(w http.ResponseWriter, r *http.Request, errMsg, noti
 		Notice:     notice,
 	}
 	if data.Configured {
-		data.RedirectURI = s.redirectURI(r)
+		data.RedirectURI = s.redirectURI()
+		data.External = s.usesExternalURL()
 		state, err := s.newState(data.RedirectURI)
 		if err != nil {
 			http.Error(w, "failed to create OAuth state", http.StatusInternalServerError)
@@ -135,18 +136,17 @@ func (s *Server) renderPage(w http.ResponseWriter, r *http.Request, errMsg, noti
 	}
 }
 
-// redirectURI must match what is registered on the OAuth client byte for byte;
-// external_url exists for when the browser's Host header is not that address.
-func (s *Server) redirectURI(r *http.Request) string {
+// Google's OAuth policy rejects plain-http redirects except to loopback, so the
+// default is localhost (the browser then shows the code in a failed tab, which the
+// paste form accepts); external_url is for an https reverse proxy in front of :8098.
+func (s *Server) redirectURI() string {
 	if s.opts.ExternalURL != "" {
 		return s.opts.ExternalURL + "/oauth/callback"
 	}
-	host := r.Host
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
-	}
-	return fmt.Sprintf("http://%s:%d/oauth/callback", host, callbackPort)
+	return fmt.Sprintf("http://localhost:%d/oauth/callback", callbackPort)
 }
+
+func (s *Server) usesExternalURL() bool { return s.opts.ExternalURL != "" }
 
 func (s *Server) newState(redirectURI string) (string, error) {
 	buf := make([]byte, 16)
@@ -204,7 +204,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleManual(w http.ResponseWriter, r *http.Request) {
 	raw := strings.TrimSpace(r.FormValue("response"))
 	if raw == "" {
-		s.renderPage(w, r, "Paste the full URL from the browser's address bar after consenting.", "")
+		s.renderPage(w, "Paste the full URL from the browser's address bar after consenting.", "")
 		return
 	}
 	code, state := raw, ""
@@ -212,11 +212,11 @@ func (s *Server) handleManual(w http.ResponseWriter, r *http.Request) {
 		code = u.Query().Get("code")
 		state = u.Query().Get("state")
 	}
-	redirectURI := s.redirectURI(r)
+	redirectURI := s.redirectURI()
 	if state != "" {
 		entry, ok := s.takeState(state)
 		if !ok {
-			s.renderPage(w, r, "That sign-in attempt has expired. Use the Connect link again, then paste the new URL.", "")
+			s.renderPage(w, "That sign-in attempt has expired. Use the Connect link again, then paste the new URL.", "")
 			return
 		}
 		redirectURI = entry.redirectURI
@@ -225,10 +225,10 @@ func (s *Server) handleManual(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	if err := s.auth.Exchange(ctx, code, redirectURI); err != nil {
 		s.log.Error("oauth_exchange_failed", "error", err.Error())
-		s.renderPage(w, r, "Token exchange failed: "+err.Error(), "")
+		s.renderPage(w, "Token exchange failed: "+err.Error(), "")
 		return
 	}
-	s.renderPage(w, r, "", "Connected. The entities in Home Assistant are now live.")
+	s.renderPage(w, "", "Connected. The entities in Home Assistant are now live.")
 }
 
 func writeResult(w http.ResponseWriter, status int, text string) {
@@ -267,8 +267,8 @@ ol li { margin-bottom: 0.4rem; }
 <strong>Configuration</strong> tab, then restart the add-on.</p>
 <ol>
 <li>In <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer">Google Cloud Console</a>, create a project and enable the <strong>YouTube Data API v3</strong>.</li>
-<li>Configure the OAuth consent screen (type <em>External</em> is fine; add your Google account as a test user).</li>
-<li>Create an <strong>OAuth client ID</strong> of type <strong>Web application</strong>.</li>
+<li>Configure the OAuth consent screen (type <em>External</em> is fine; add the channel's Google account as a test user).</li>
+<li>Create an <strong>OAuth client ID</strong> of type <strong>Desktop app</strong>. No redirect URI needs to be registered for this type.</li>
 </ol>
 {{else}}
 {{if .Authorized}}
@@ -277,21 +277,34 @@ ol li { margin-bottom: 0.4rem; }
 {{else}}
 <p><span class="badge warn">Not connected</span> — consent once and the refresh token is kept in <code>/data</code>.</p>
 {{end}}
+{{if .External}}
 <h2>1 · Register the redirect URI</h2>
-<p>On the OAuth client in Google Cloud Console, add this exact <strong>authorized redirect URI</strong>:</p>
+<p>Your OAuth client must be of type <strong>Web application</strong> with this exact <strong>authorized redirect URI</strong>
+(Google requires https for anything other than localhost):</p>
 <p><code>{{.RedirectURI}}</code></p>
-<p>If that host is wrong, set the <code>external_url</code> add-on option (for example
-<code>http://192.168.1.10</code>) and reload this page.</p>
 <h2>2 · Consent</h2>
 <p><a class="button" href="{{.AuthURL}}" target="_blank" rel="noreferrer">Connect Google account</a></p>
-<p>Sign in with the channel's account and allow <em>Manage your YouTube account</em>. Google then
-redirects back to the add-on and the connection completes on its own.</p>
+<p>Sign in with the channel's account and allow <em>Manage your YouTube account</em>. Google redirects back
+through your proxy to the add-on and the connection completes on its own.</p>
 <h2>If the redirect page fails to load</h2>
 <p>The consent still succeeded — the code is in the address bar. Paste the full URL here:</p>
+{{else}}
+<h2>1 · Consent</h2>
+<p>Use an OAuth client of type <strong>Desktop app</strong> — Google allows its <code>localhost</code> redirect
+without registration. (Redirect URI in use: <code>{{.RedirectURI}}</code>.)</p>
+<p><a class="button" href="{{.AuthURL}}" target="_blank" rel="noreferrer">Connect Google account</a></p>
+<p>Sign in with the channel's account and allow <em>Manage your YouTube account</em>.</p>
+<h2>2 · Paste the result</h2>
+<p>After consenting, Google sends the browser to <code>localhost</code>, which shows a "can't connect" page
+unless this browser is running on the Home Assistant machine. <strong>That is expected</strong> — the
+consent succeeded and the code is in that tab's address bar. Copy the whole URL and paste it here:</p>
+{{end}}
 <form method="post" action="manual">
-<input type="text" name="response" placeholder="http://…/oauth/callback?state=…&code=…" autocomplete="off">
+<input type="text" name="response" placeholder="http://localhost:8098/oauth/callback?state=…&code=…" autocomplete="off">
 <button type="submit">Finish connection</button>
 </form>
+<p>Have a public https hostname that forwards to this add-on's port 8098? Set the <code>external_url</code>
+option and the redirect completes automatically instead.</p>
 {{end}}
 </body>
 </html>
