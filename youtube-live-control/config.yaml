@@ -1,0 +1,35 @@
+name: YouTube Live Control
+version: "1.0.0"
+slug: youtube_live_control
+description: One-panel MQTT control for scheduled YouTube live broadcasts — pick, edit, go live, end
+url: https://github.com/jacobgad/youtube-live-control
+arch:
+  - aarch64
+  - amd64
+services:
+  - mqtt:need
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:youtube
+panel_title: YouTube Live
+ports:
+  8098/tcp: 8098
+ports_description:
+  8098/tcp: OAuth redirect endpoint; Google returns the consent code here
+map:
+  - media:ro
+  - share:ro
+options:
+  google_client_id: ""
+  google_client_secret: ""
+  external_url: ""
+  privacy: public
+  thumbnails_dir: /media/youtube-live-control
+  log_level: info
+schema:
+  google_client_id: str
+  google_client_secret: password
+  external_url: str?
+  privacy: list(public|unlisted|private)
+  thumbnails_dir: str?
+  log_level: list(debug|info|warn|error)

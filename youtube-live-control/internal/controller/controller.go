@@ -1,0 +1,438 @@
+// Package controller orchestrates the add-on: the broadcast selector session behind
+// the Home Assistant panel, quota-aware polling of the YouTube Data API, and command
+// handling that verifies, writes, then reads back — never publishing optimistically.
+package controller
+
+import (
+	"context"
+	"log/slog"
+	"path/filepath"
+	"sort"
+	"sync"
+	"sync/atomic"
+	"time"
+
+	"github.com/jacobgad/youtube-live-control/internal/config"
+	"github.com/jacobgad/youtube-live-control/internal/mqtt"
+	"github.com/jacobgad/youtube-live-control/internal/youtube"
+)
+
+const (
+	mqttStartupWait = 10 * time.Second
+	commandBuffer   = 8
+)
+
+// Deps are the controller's collaborators.
+type Deps struct {
+	YouTube      *youtube.Client
+	Auth         *youtube.Auth
+	MQTT         mqtt.Connection
+	Options      config.Options
+	SettingsPath string
+	Log          *slog.Logger
+	Origin       mqtt.Origin
+	Now          func() time.Time
+}
+
+// Controller is the add-on's long-lived core. Create it with New and drive it with Start/Stop.
+type Controller struct {
+	yt           *youtube.Client
+	auth         *youtube.Auth
+	mqtt         mqtt.Connection
+	opts         config.Options
+	settingsPath string
+	log          *slog.Logger
+	now          func() time.Time
+	pub          *publisher
+
+	mu sync.Mutex
+	s  session
+
+	ops        chan queuedOp
+	statusKick chan struct{}
+	listKick   chan struct{}
+
+	// lifetime spans New to Stop. It is the one context this type owns: broker callbacks
+	// arrive with no context of their own and may fire before Start.
+	lifetime context.Context
+	endLife  context.CancelFunc
+	inflight sync.WaitGroup
+	started  atomic.Bool
+	opsDone  chan struct{}
+	listDone chan struct{}
+	statDone chan struct{}
+}
+
+type queuedOp struct {
+	name string
+	run  func(context.Context)
+}
+
+// New wires the controller to its MQTT connection; nothing talks to YouTube until Start.
+func New(deps Deps) *Controller {
+	log := deps.Log
+	if log == nil {
+		log = slog.Default()
+	}
+	now := deps.Now
+	if now == nil {
+		now = time.Now
+	}
+	c := &Controller{
+		yt:           deps.YouTube,
+		auth:         deps.Auth,
+		mqtt:         deps.MQTT,
+		opts:         deps.Options,
+		settingsPath: deps.SettingsPath,
+		log:          log,
+		now:          now,
+		pub:          newPublisher(deps.MQTT, deps.Origin, log),
+		ops:          make(chan queuedOp, commandBuffer),
+		statusKick:   make(chan struct{}, 1),
+		listKick:     make(chan struct{}, 1),
+		opsDone:      make(chan struct{}),
+		listDone:     make(chan struct{}),
+		statDone:     make(chan struct{}),
+	}
+	c.lifetime, c.endLife = context.WithCancel(context.Background())
+	c.s.thumbnail = KeepCurrentLabel
+	c.s.tun = defaultTunables
+
+	c.mqtt.OnMessage(mqtt.NewRouter(mqtt.Actions{
+		BroadcastSelected: c.selectBroadcast,
+		TitleEntered:      c.enterTitle,
+		ScheduledEntered:  c.enterScheduled,
+		ThumbnailSelected: c.selectThumbnail,
+		FastModeSwitched:  c.switchFastMode,
+		NumberEntered:     c.setTunable,
+		SavePressed:       func() { c.pressed("save", c.save) },
+		CreatePressed:     func() { c.pressed("create", c.create) },
+		GoLivePressed:     func() { c.pressed("go_live", c.goLive) },
+		EndPressed:        func() { c.pressed("end_stream", c.endStream) },
+		HomeAssistantOnline: func() {
+			c.background(func(ctx context.Context) { c.pub.everything(ctx, c.snapshot) })
+		},
+	}, log))
+	c.mqtt.OnConnect(func() { c.background(c.onMQTTConnected) })
+	c.auth.OnChange(func(authorized bool) {
+		c.background(func(ctx context.Context) { c.authChanged(ctx, authorized) })
+	})
+	return c
+}
+
+// Start publishes discovery and state, loads the broadcast list if already authorized,
+// and begins the two poll loops and the command worker.
+func (c *Controller) Start(ctx context.Context) error {
+	if !c.started.CompareAndSwap(false, true) {
+		return nil
+	}
+	tun := loadTunables(c.settingsPath, c.log)
+	c.mu.Lock()
+	c.s.authorized = c.auth.Authorized()
+	c.s.tun = tun
+	c.mu.Unlock()
+	c.log.Info("controller_started",
+		"authorized", c.auth.Authorized(),
+		"thumbnailsDir", c.opts.ThumbnailsDir,
+		"listPollMinutes", tun.ListPollMinutes,
+		"fastPollSeconds", tun.FastPollSeconds,
+		"fastModeMinutes", tun.FastModeMinutes,
+		"livePollSeconds", tun.LivePollSeconds,
+		"idlePollMinutes", tun.IdlePollMinutes)
+
+	waitCtx, cancel := context.WithTimeout(ctx, mqttStartupWait)
+	err := c.mqtt.AwaitConnection(waitCtx)
+	cancel()
+	if err != nil {
+		c.log.Warn("mqtt_not_ready", "detail", "continuing; state will be republished on connect")
+	} else {
+		c.onMQTTConnected(ctx)
+	}
+
+	if c.auth.Authorized() {
+		c.refreshList(ctx)
+	}
+
+	go c.opsLoop()
+	go c.listLoop()
+	go c.statusLoop()
+	return nil
+}
+
+// Stop ends background work, publishes the controller offline and closes MQTT.
+// It gives up waiting when ctx expires so a stuck API call cannot block shutdown.
+func (c *Controller) Stop(ctx context.Context) {
+	c.endLife()
+	if c.started.Load() {
+		waitFor(ctx, c.opsDone)
+		waitFor(ctx, c.listDone)
+		waitFor(ctx, c.statDone)
+	}
+	waitFor(ctx, whenDone(c.inflight.Wait))
+	if c.mqtt.Connected() {
+		c.pub.controllerOffline(ctx)
+	}
+	if err := c.mqtt.Close(ctx); err != nil {
+		c.log.Warn("operation_failed", "operation", "mqtt_close", "error", err)
+	}
+	c.log.Info("controller_stopped")
+}
+
+func waitFor(ctx context.Context, done <-chan struct{}) {
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
+}
+
+func whenDone(fn func()) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		fn()
+	}()
+	return done
+}
+
+func (c *Controller) background(fn func(context.Context)) {
+	c.inflight.Add(1)
+	go func() {
+		defer c.inflight.Done()
+		fn(c.lifetime)
+	}()
+}
+
+// enqueue reserves the command's place in the single worker queue inline, so button
+// presses run in press order; a full queue drops the press rather than block the broker.
+func (c *Controller) enqueue(name string, op func(context.Context)) {
+	select {
+	case c.ops <- queuedOp{name: name, run: op}:
+	default:
+		c.log.Warn("command_dropped_busy", "command", name)
+	}
+}
+
+func (c *Controller) opsLoop() {
+	defer close(c.opsDone)
+	for {
+		select {
+		case <-c.lifetime.Done():
+			return
+		case op := <-c.ops:
+			c.log.Info("command_started", "command", op.name)
+			op.run(c.lifetime)
+			c.log.Info("command_finished", "command", op.name)
+		}
+	}
+}
+
+func (c *Controller) onMQTTConnected(ctx context.Context) {
+	if err := c.mqtt.Subscribe(ctx, mqtt.Subscriptions); err != nil {
+		c.log.Error("operation_failed", "operation", "subscribe", "error", err)
+	}
+	c.pub.everything(ctx, c.snapshot)
+}
+
+func (c *Controller) authChanged(ctx context.Context, authorized bool) {
+	c.mu.Lock()
+	c.s.authorized = authorized
+	if authorized {
+		c.s.armFast(c.now())
+	}
+	c.mu.Unlock()
+	c.log.Info("authorization_changed", "authorized", authorized)
+	c.pub.update(ctx, c.snapshot)
+	if authorized {
+		c.refreshList(ctx)
+		c.kickStatusPoll()
+	}
+}
+
+func (c *Controller) snapshot() snapshot {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	b := c.s.selected()
+	now := c.now()
+	return snapshot{
+		authorized:       c.s.authorized,
+		broadcastOptions: c.s.selectOptions(),
+		thumbnailOptions: c.s.thumbnailOptions(),
+		selectedLabel:    c.s.selectedLabel(),
+		title:            c.s.draftTitle,
+		scheduled:        formatWhen(c.s.draftStart),
+		thumbnail:        c.s.thumbnail,
+		health:           healthText(b, c.s.stream),
+		status:           statusText(b, c.s.stream, c.s.pending),
+		viewers:          c.s.viewers,
+		fastMode:         c.s.fastActive(now),
+		fastRemaining:    c.s.fastRemainingMinutes(now),
+		tun:              c.s.tun,
+		g:                computeGates(c.s.authorized, b, c.s.stream, c.s.pending != pendingNone),
+	}
+}
+
+func (c *Controller) kickListPoll() {
+	select {
+	case c.listKick <- struct{}{}:
+	default:
+	}
+}
+
+// pressed arms the fast-refresh window on every button press — even one whose
+// operation is later refused, since a refused End press is exactly "human waiting
+// for streamStatus to catch up" — then queues the operation.
+func (c *Controller) pressed(name string, op func(context.Context)) {
+	c.mu.Lock()
+	c.s.armFast(c.now())
+	c.mu.Unlock()
+	c.log.Debug("fast_mode_armed", "reason", name+"_press")
+	c.kickStatusPoll()
+	c.enqueue(name, op)
+}
+
+func (c *Controller) switchFastMode(on bool) {
+	c.mu.Lock()
+	if on {
+		c.s.armFast(c.now())
+	} else {
+		c.s.fastUntil = time.Time{}
+	}
+	c.mu.Unlock()
+	c.log.Info("fast_mode_switched", "on", on)
+	c.publishUpdate()
+	if on {
+		c.kickStatusPoll()
+	}
+}
+
+// setTunable applies a settings number: validate against the entity's range, apply,
+// persist to /data, republish, and wake the loops so the new cadence takes effect
+// immediately. Settings changes are admin work and do not arm the fast window.
+func (c *Controller) setTunable(object, raw string) {
+	spec, ok := tunableSpec(object)
+	if !ok {
+		return
+	}
+	value, ok := parseIntPayload(raw)
+	if !ok || value < spec.Min || value > spec.Max {
+		c.log.Warn("setting_rejected", "setting", object, "payload", raw)
+		c.snapBack(mqtt.NumberState(object))
+		return
+	}
+	c.mu.Lock()
+	*tunableFields[object](&c.s.tun) = value
+	saved := c.s.tun
+	c.mu.Unlock()
+	c.log.Info("setting_changed", "setting", object, "value", value)
+	if err := saved.save(c.settingsPath); err != nil {
+		c.log.Error("settings_persist_failed", "path", c.settingsPath, "error", err.Error())
+	}
+	c.publishUpdate()
+	c.kickStatusPoll()
+	if object == "list_poll_minutes" {
+		c.kickListPoll()
+	}
+}
+
+func (c *Controller) kickStatusPoll() {
+	select {
+	case c.statusKick <- struct{}{}:
+	default:
+	}
+}
+
+// selectBroadcast handles the Broadcast select: on any valid change it re-seeds the
+// drafts and republishes every detail entity so the panel pre-fills, then verifies
+// against the API with an immediate status poll.
+func (c *Controller) selectBroadcast(label string) {
+	c.mu.Lock()
+	c.s.armFast(c.now())
+	id, ok := c.s.idForLabel(label)
+	if !ok {
+		c.mu.Unlock()
+		c.log.Warn("select_rejected", "label", label, "reason", "unknown_option")
+		c.snapBack(mqtt.BroadcastState)
+		c.kickStatusPoll()
+		return
+	}
+	c.s.selectedID = id
+	c.s.pending = pendingNone
+	c.s.loadDrafts()
+	c.mu.Unlock()
+	c.log.Info("broadcast_selected", "id", id, "label", label)
+	c.publishUpdate()
+	c.kickStatusPoll()
+}
+
+func (c *Controller) enterTitle(raw string) {
+	c.armFastMode("title")
+	if len(raw) == 0 || len(raw) > mqtt.MaxTitleLength {
+		c.log.Warn("title_rejected", "length", len(raw))
+		c.snapBack(mqtt.TitleState)
+		return
+	}
+	c.mu.Lock()
+	c.s.draftTitle = raw
+	c.mu.Unlock()
+	c.publishUpdate()
+}
+
+func (c *Controller) enterScheduled(raw string) {
+	c.armFastMode("scheduled_start")
+	when, err := parseWhen(raw)
+	if err != nil {
+		c.log.Warn("scheduled_start_rejected", "payload", raw, "error", err.Error())
+		c.snapBack(mqtt.ScheduledState)
+		return
+	}
+	c.mu.Lock()
+	c.s.draftStart = when
+	c.mu.Unlock()
+	c.publishUpdate()
+}
+
+func (c *Controller) selectThumbnail(label string) {
+	c.armFastMode("thumbnail")
+	c.mu.Lock()
+	if !c.s.validThumbnail(label) {
+		c.mu.Unlock()
+		c.log.Warn("thumbnail_rejected", "label", label, "reason", "unknown_option")
+		c.snapBack(mqtt.ThumbnailState)
+		return
+	}
+	c.s.thumbnail = label
+	c.mu.Unlock()
+	c.publishUpdate()
+}
+
+func (c *Controller) armFastMode(reason string) {
+	c.mu.Lock()
+	c.s.armFast(c.now())
+	c.mu.Unlock()
+	c.log.Debug("fast_mode_armed", "reason", reason)
+	c.kickStatusPoll()
+}
+
+func (c *Controller) publishUpdate() {
+	c.background(func(ctx context.Context) { c.pub.update(ctx, c.snapshot) })
+}
+
+// snapBack re-sends the retained state for a rejected command so the field in Home
+// Assistant reverts instead of sticking on the rejected value.
+func (c *Controller) snapBack(topics ...string) {
+	c.pub.invalidate(topics...)
+	c.publishUpdate()
+}
+
+// scanThumbnails lists the image files offered by the Thumbnail select.
+func scanThumbnails(dir string) []string {
+	var files []string
+	for _, pattern := range []string{"*.jpg", "*.jpeg", "*.png"} {
+		matches, _ := filepath.Glob(filepath.Join(dir, pattern))
+		for _, m := range matches {
+			files = append(files, filepath.Base(m))
+		}
+	}
+	sort.Strings(files)
+	return files
+}

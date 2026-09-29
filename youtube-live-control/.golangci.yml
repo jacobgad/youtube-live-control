@@ -1,0 +1,56 @@
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+    - revive
+    - gosec
+    - errorlint
+    - bodyclose
+    - noctx
+    - misspell
+    - unconvert
+    - unparam
+    - prealloc
+    - copyloopvar
+    - nilerr
+  settings:
+    errcheck:
+      exclude-functions:
+        - (io.Closer).Close
+        - (*database/sql.DB).Close
+        - (*database/sql.Rows).Close
+        - (*database/sql.Tx).Rollback
+    misspell:
+      ignore-rules:
+        - mosquitto
+    revive:
+      rules:
+        - name: exported
+        - name: package-comments
+        - name: var-naming
+        - name: receiver-naming
+        - name: error-strings
+        - name: error-naming
+        - name: unexported-return
+        - name: context-as-argument
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: superfluous-else
+        - name: unused-parameter
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters: [gosec, errcheck, revive, unparam, noctx, bodyclose]
+      - path: internal/testutil/
+        linters: [gosec, errcheck, revive, nilerr]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
