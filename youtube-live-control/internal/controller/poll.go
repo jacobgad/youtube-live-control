@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"slices"
@@ -43,7 +42,7 @@ func (c *Controller) statusDelay() time.Duration {
 	if c.session.fastActive(c.now()) {
 		return c.opts.FastPollInterval
 	}
-	if b := c.session.selected(); b != nil && (b.LifeCycleStatus == youtube.LifeLive || b.LifeCycleStatus == youtube.LifeLiveStarting) {
+	if b := c.session.selected(); b != nil && isLive(*b) {
 		return c.opts.LivePollInterval
 	}
 	return c.opts.IdlePollInterval
@@ -67,8 +66,6 @@ func (c *Controller) reapFastMode(ctx context.Context) {
 	}
 }
 
-// The selected broadcast is pinned into the list so it cannot vanish from the select
-// mid-service (a live broadcast leaves "upcoming"); drafts are never touched here.
 func (c *Controller) refreshList(ctx context.Context) {
 	if !c.auth.Authorized() {
 		return
@@ -83,43 +80,31 @@ func (c *Controller) refreshList(ctx context.Context) {
 		c.logListError("list_active", err)
 		return
 	}
-	merged := make([]youtube.Broadcast, 0, len(upcoming)+len(active)+1)
+	merged := make([]youtube.Broadcast, 0, len(upcoming)+len(active))
 	seen := map[string]bool{}
 	for _, b := range slices.Concat(active, upcoming) {
-		if !seen[b.ID] {
+		if !seen[b.ID] && !b.IsDefault {
 			seen[b.ID] = true
 			merged = append(merged, b)
 		}
 	}
-	thumbs := scanThumbnails(c.opts.ThumbnailsDir)
+	slices.SortStableFunc(merged, compareBroadcasts)
 
 	c.mu.Lock()
-	if c.session.selectedID != "" && !seen[c.session.selectedID] {
-		if pinned := c.session.selected(); pinned != nil {
-			merged = append(merged, *pinned)
-		}
+	// A selected broadcast that is mid-transition or live is pinned even if YouTube's
+	// list filters momentarily omit it, so the panel cannot lose it mid-service.
+	if pinned := c.session.selected(); pinned != nil && !seen[pinned.ID] && pinned.LifeCycleStatus != youtube.LifeComplete {
+		merged = append(merged, *pinned)
 	}
-	slices.SortStableFunc(merged, compareBroadcasts)
-	c.session.setBroadcasts(merged)
-	c.session.thumbFiles = thumbs
-	if !c.session.validThumbnail(c.session.thumbnail) {
-		c.session.thumbnail = keepCurrentLabel
-	}
+	lost := c.session.setBroadcasts(merged, c.now())
+	staleCount := len(c.session.stale)
 	c.mu.Unlock()
 
-	c.log.Info("broadcast_list_refreshed", "upcoming", len(upcoming), "active", len(active), "thumbnails", len(thumbs))
-	c.pub.update(ctx, c.snapshot)
-}
-
-// Unscheduled broadcasts sort last; otherwise by start, then title for a stable label order.
-func compareBroadcasts(a, b youtube.Broadcast) int {
-	if a.ScheduledStart.IsZero() != b.ScheduledStart.IsZero() {
-		if a.ScheduledStart.IsZero() {
-			return 1
-		}
-		return -1
+	c.log.Info("broadcast_list_refreshed", "upcoming", len(upcoming), "active", len(active), "hiddenStale", staleCount)
+	if lost {
+		c.log.Info("selection_cleared", "reason", "broadcast_no_longer_listed")
 	}
-	return cmp.Or(a.ScheduledStart.Compare(b.ScheduledStart), cmp.Compare(a.Title, b.Title))
+	c.pub.update(ctx, c.snapshot)
 }
 
 func (c *Controller) pollStatus(ctx context.Context) {
@@ -139,7 +124,7 @@ func (c *Controller) pollStatus(ctx context.Context) {
 	}
 	if !ok {
 		c.log.Warn("broadcast_missing", "id", id)
-		c.deselectMissing(ctx, id)
+		c.dropMissing(ctx, id)
 		return
 	}
 	var stream youtube.StreamStatus
@@ -149,19 +134,10 @@ func (c *Controller) pollStatus(ctx context.Context) {
 			return
 		}
 	}
-	viewers := 0
-	if b.LifeCycleStatus == youtube.LifeLive {
-		if viewers, err = c.yt.ConcurrentViewers(ctx, id); err != nil {
-			c.log.Warn("viewers_unavailable", "id", id, "error", err)
-			viewers = 0
-		}
-	}
-
 	c.mu.Lock()
 	c.session.apply(b)
 	if c.session.selectedID == id {
 		c.session.stream = stream
-		c.session.viewers = viewers
 	}
 	c.mu.Unlock()
 	c.pub.update(ctx, c.snapshot)

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{.Title}} · YouTube Live Control</title>
+<style>
+:root { color-scheme: light dark; }
+body { font-family: -apple-system, system-ui, sans-serif; margin: 0; color: #1c1c1e; background: #f7f7f9; }
+@media (prefers-color-scheme: dark) { body { color: #f2f2f7; background: #111; } .card, input, textarea, select { background: #1c1c1e; color: #f2f2f7; border-color: #3a3a3c; } code { background: #2c2c2e; } }
+header { display: flex; align-items: center; gap: 1rem; padding: 0.8rem 1.2rem; border-bottom: 1px solid #d1d1d6; flex-wrap: wrap; }
+header h1 { font-size: 1.1rem; margin: 0; }
+header .channel { color: #8e8e93; font-size: 0.9rem; }
+nav { margin-left: auto; display: flex; gap: 0.3rem; }
+nav a { padding: 0.4rem 0.8rem; border-radius: 999px; text-decoration: none; color: inherit; }
+nav a.active { background: #c00; color: #fff; }
+main { max-width: 52rem; margin: 1.2rem auto; padding: 0 1rem; }
+h2 { font-size: 1.05rem; margin: 1.6rem 0 0.6rem; }
+.card { background: #fff; border: 1px solid #d1d1d6; border-radius: 10px; padding: 1rem 1.2rem; margin-bottom: 1rem; }
+.row { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+.row .grow { flex: 1 1 14rem; }
+.muted { color: #8e8e93; }
+.stale { opacity: 0.6; }
+.badge { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.8rem; font-weight: 600; background: #e5e5ea; color: #3a3a3c; }
+.badge.live { background: #fdd8d6; color: #b3261e; }
+.badge.selected { background: #d1f2d9; color: #1d7a36; }
+.badge.warn { background: #fde3c9; color: #ad5700; }
+.error { background: #fdd8d6; color: #b3261e; padding: 0.7rem 1rem; border-radius: 8px; margin-bottom: 1rem; }
+.notice { background: #d1f2d9; color: #1d7a36; padding: 0.7rem 1rem; border-radius: 8px; margin-bottom: 1rem; }
+label { display: block; font-size: 0.85rem; font-weight: 600; margin: 0.8rem 0 0.25rem; }
+input[type=text], input[type=datetime-local], input[type=time], textarea, select { width: 100%; padding: 0.55rem; border: 1px solid #c7c7cc; border-radius: 6px; box-sizing: border-box; font: inherit; }
+textarea { min-height: 7rem; }
+.button, button { display: inline-block; padding: 0.55rem 1.1rem; border: 0; border-radius: 8px; background: #1c1c1e; color: #fff; font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
+.button.primary, button.primary { background: #c00; }
+.button.quiet, button.quiet { background: transparent; color: inherit; border: 1px solid #c7c7cc; }
+.actions { display: flex; gap: 0.6rem; margin-top: 1.2rem; flex-wrap: wrap; align-items: center; }
+img.thumb { max-width: 16rem; border-radius: 6px; display: block; margin-top: 0.4rem; }
+code { background: #f2f2f7; padding: 0.15rem 0.4rem; border-radius: 4px; word-break: break-all; }
+ol li { margin-bottom: 0.4rem; }
+form.inline { display: inline; }
+</style>
+</head>
+<body>
+<header>
+<h1>YouTube Live Control</h1>
+{{if .Channel}}<span class="channel">{{.Channel}}</span>{{end}}
+<nav>
+{{if .Authorized}}
+<a href="{{.Base}}/broadcasts" {{if eq .Tab "broadcasts" "broadcast_form"}}class="active"{{end}}>Broadcasts</a>
+<a href="{{.Base}}/presets" {{if eq .Tab "presets" "preset_form"}}class="active"{{end}}>Presets</a>
+{{end}}
+<a href="{{.Base}}/connection" {{if eq .Tab "connection"}}class="active"{{end}}>Connection</a>
+</nav>
+</header>
+<main>
+{{if .Error}}<p class="error">{{.Error}}</p>{{end}}
+{{if .Notice}}<p class="notice">{{.Notice}}</p>{{end}}
+{{template "content" .}}
+</main>
+</body>
+</html>

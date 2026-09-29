@@ -1,7 +1,9 @@
 package controller
 
 import (
+	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"strconv"
@@ -9,25 +11,37 @@ import (
 	"time"
 
 	"github.com/jacobgad/youtube-live-control/internal/mqtt"
+	"github.com/jacobgad/youtube-live-control/internal/youtube"
 )
 
 const publishTimeout = 5 * time.Second
 
+// mqttNone is Home Assistant's MQTT null payload; an empty string on a timestamp
+// sensor is logged as an invalid state instead.
+const mqttNone = "None"
+
 type snapshot struct {
-	authorized       bool
-	broadcastOptions []string
-	thumbnailOptions []string
-	selectedLabel    string
-	title            string
-	scheduled        string
-	thumbnail        string
-	health           string
-	status           string
-	viewers          int
-	fastMode         bool
-	fastRemaining    int
-	channel          string
-	gates            gates
+	authorized     bool
+	channel        string
+	options        mqtt.Options
+	selectedLabel  string
+	attributes     string
+	title          string
+	privacy        string
+	scheduledStart string
+	thumbnailURL   string
+	stage          string
+	live           bool
+	encoder        bool
+	health         string
+	status         string
+	fastMode       bool
+	fastRemaining  int
+	gates          gates
+	presetLabel    string
+	dateLabel      string
+	timeLabel      string
+	canSchedule    bool
 }
 
 type message struct {
@@ -91,47 +105,66 @@ func (p *publisher) send(ctx context.Context, snap snapshot) {
 }
 
 func render(snap snapshot, origin mqtt.Origin) []message {
-	out := make([]message, 0, 32)
+	configs := mqtt.Messages(origin, snap.options)
+	out := make([]message, 0, 1+len(configs)+len(mqtt.RetiredConfigTopics)+24)
 	out = append(out, message{mqtt.ControllerAvailability, mqtt.PayloadOnline})
-	for _, m := range mqtt.Messages(origin, snap.broadcastOptions, snap.thumbnailOptions) {
+	for _, m := range configs {
 		out = append(out, message{m.Topic, m.JSON()})
-	}
-	auth := mqtt.PayloadUnauthorized
-	if snap.authorized {
-		auth = mqtt.PayloadAuthorized
-	}
-	fastMode := mqtt.PayloadOff
-	if snap.fastMode {
-		fastMode = mqtt.PayloadOn
 	}
 	for _, topic := range mqtt.RetiredConfigTopics {
 		out = append(out, message{topic, ""})
 	}
 	out = append(out,
-		message{mqtt.AuthState, auth},
+		message{mqtt.AuthState, onOff(snap.authorized, mqtt.PayloadAuthorized, mqtt.PayloadUnauthorized)},
 		message{mqtt.ChannelState, snap.channel},
 		message{mqtt.BroadcastState, snap.selectedLabel},
+		message{mqtt.BroadcastAttributes, snap.attributes},
 		message{mqtt.TitleState, snap.title},
-		message{mqtt.ScheduledState, snap.scheduled},
-		message{mqtt.ThumbnailState, snap.thumbnail},
-		message{mqtt.FastModeState, fastMode},
+		message{mqtt.PrivacyState, snap.privacy},
+		message{mqtt.ScheduledStartState, cmp.Or(snap.scheduledStart, mqttNone)},
+		message{mqtt.ThumbnailURLState, snap.thumbnailURL},
+		message{mqtt.ThumbnailAvail, onOff(snap.thumbnailURL != "", mqtt.PayloadOnline, mqtt.PayloadOffline)},
+		message{mqtt.StageState, snap.stage},
+		message{mqtt.LiveState, onOff(snap.live, mqtt.PayloadOn, mqtt.PayloadOff)},
+		message{mqtt.EncoderState, onOff(snap.encoder, mqtt.PayloadOn, mqtt.PayloadOff)},
+		message{mqtt.FastModeState, onOff(snap.fastMode, mqtt.PayloadOn, mqtt.PayloadOff)},
 		message{mqtt.FastRemainingState, strconv.Itoa(snap.fastRemaining)},
 		message{mqtt.HealthState, snap.health},
 		message{mqtt.StatusState, snap.status},
-		message{mqtt.ViewersState, strconv.Itoa(snap.viewers)},
-		message{mqtt.SaveAvailability, availability(snap.gates.save)},
-		message{mqtt.CreateAvailability, availability(snap.gates.create)},
-		message{mqtt.GoLiveAvailability, availability(snap.gates.goLive)},
-		message{mqtt.EndAvailability, availability(snap.gates.end)},
+		message{mqtt.GoLiveAvailability, onOff(snap.gates.goLive, mqtt.PayloadOnline, mqtt.PayloadOffline)},
+		message{mqtt.EndAvailability, onOff(snap.gates.end, mqtt.PayloadOnline, mqtt.PayloadOffline)},
+		message{mqtt.PresetState, snap.presetLabel},
+		message{mqtt.DateState, snap.dateLabel},
+		message{mqtt.TimeState, snap.timeLabel},
+		message{mqtt.ScheduleAvailability, onOff(snap.canSchedule, mqtt.PayloadOnline, mqtt.PayloadOffline)},
 	)
 	return out
 }
 
-func availability(enabled bool) string {
-	if enabled {
-		return mqtt.PayloadOnline
+func onOff(v bool, on, off string) string {
+	if v {
+		return on
 	}
-	return mqtt.PayloadOffline
+	return off
+}
+
+// Attributes cost nothing: every field is already in the broadcast we poll.
+func broadcastAttributes(b *youtube.Broadcast) string {
+	if b == nil {
+		return "{}"
+	}
+	attrs := map[string]any{
+		"id":            b.ID,
+		"privacy":       b.PrivacyStatus,
+		"lifecycle":     b.LifeCycleStatus,
+		"thumbnail_url": b.ThumbnailURL,
+		"watch_url":     "https://www.youtube.com/watch?v=" + b.ID,
+	}
+	if !b.ScheduledStart.IsZero() {
+		attrs["scheduled_start"] = b.ScheduledStart.Format(time.RFC3339)
+	}
+	data, _ := json.Marshal(attrs)
+	return string(data)
 }
 
 func (p *publisher) publish(ctx context.Context, topic, payload string) bool {

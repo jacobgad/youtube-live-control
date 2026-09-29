@@ -1,0 +1,56 @@
+{{define "content"}}
+{{with .Data}}
+<div class="card">
+<form method="post" action="{{$.Base}}/presets/{{if .IsNew}}new{{else}}{{.Preset.ID}}{{end}}" enctype="multipart/form-data">
+<label for="name">Preset name</label>
+<input type="text" id="name" name="name" value="{{.Preset.Name}}" placeholder="Sunday morning" required>
+
+<label for="title_template">Title</label>
+<input type="text" id="title_template" name="title_template" value="{{.Preset.TitleTemplate}}" maxlength="100" required>
+<p class="muted"><code>{date}</code> becomes the scheduled date, e.g. <em>5 Jan 2025</em>.</p>
+
+<label for="description">Description</label>
+<textarea id="description" name="description" maxlength="5000">{{.Preset.Description}}</textarea>
+
+<div class="row">
+<div class="grow">
+<label for="weekday">Usual day</label>
+<select id="weekday" name="weekday">
+{{range weekdays}}<option value="{{printf "%d" .}}" {{if eq . $.Data.Preset.Weekday}}selected{{end}}>{{.}}</option>{{end}}
+</select>
+</div>
+<div class="grow">
+<label for="time_of_day">Usual time</label>
+<input type="time" id="time_of_day" name="time_of_day" value="{{.Preset.TimeOfDay}}" step="1800" required>
+<p class="muted">On the hour or half hour.</p>
+</div>
+<div class="grow">
+<label for="privacy">Privacy</label>
+<select id="privacy" name="privacy">
+<option value="public" {{if eq .Preset.Privacy "public"}}selected{{end}}>Public</option>
+<option value="unlisted" {{if eq .Preset.Privacy "unlisted"}}selected{{end}}>Unlisted</option>
+<option value="private" {{if eq .Preset.Privacy "private"}}selected{{end}}>Private</option>
+</select>
+</div>
+</div>
+
+<label for="stream_id">Stream key</label>
+<select id="stream_id" name="stream_id" required>
+<option value="">Choose the stream key OBS uses…</option>
+{{range .Streams}}<option value="{{.ID}}" {{if eq .ID $.Data.Preset.StreamID}}selected{{end}}>{{.Title}} · {{.Resolution}}{{if .FrameRate}} {{.FrameRate}}{{end}} · key {{keySuffix .StreamKey}}</option>{{end}}
+</select>
+{{if not .Streams}}<p class="muted">No stream keys found on this channel. Create one in YouTube Studio → Go live → Stream settings, then reload.</p>{{end}}
+
+<label for="thumbnail">Thumbnail</label>
+{{if .Preset.ThumbnailFile}}<img class="thumb" src="{{$.Base}}/presets/{{.Preset.ID}}/thumbnail" alt="Preset thumbnail">{{end}}
+<input type="file" id="thumbnail" name="thumbnail" accept="image/jpeg,image/png">
+<p class="muted">JPEG or PNG, up to 2 MB, ideally 1280×720. Uploaded to every broadcast scheduled from this preset.</p>
+
+<div class="actions">
+<button type="submit" class="primary">Save preset</button>
+<a class="button quiet" href="{{$.Base}}/presets">Cancel</a>
+</div>
+</form>
+</div>
+{{end}}
+{{end}}

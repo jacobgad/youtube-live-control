@@ -2,10 +2,9 @@ package controller
 
 import (
 	"context"
-	"os"
-	"path/filepath"
+	"errors"
+	"fmt"
 	"slices"
-	"strings"
 	"time"
 
 	"github.com/jacobgad/youtube-live-control/internal/youtube"
@@ -17,121 +16,67 @@ const (
 	transitionInterval = 3 * time.Second
 )
 
-func (c *Controller) save(ctx context.Context) {
+// ErrNoSelection is returned by panel edits while nothing is selected.
+var ErrNoSelection = errors.New("no broadcast selected")
+
+// snapTopic is re-sent on failure so the Home Assistant field reverts.
+func (c *Controller) editSelected(ctx context.Context, snapTopic string, mutate func(*youtube.Broadcast)) error {
 	c.mu.Lock()
 	id := c.session.selectedID
-	title := c.session.draftTitle
-	start := c.session.draftStart
-	thumbnail := c.session.thumbnail
 	c.mu.Unlock()
 	if id == "" {
-		c.log.Warn("save_rejected", "reason", "no_broadcast_selected")
-		return
+		c.snapBack(snapTopic)
+		return ErrNoSelection
 	}
+	if _, err := c.updateBroadcast(ctx, id, mutate); err != nil {
+		c.snapBack(snapTopic)
+		return err
+	}
+	return nil
+}
 
+func (c *Controller) updateBroadcast(ctx context.Context, id string, mutate func(*youtube.Broadcast)) (youtube.Broadcast, error) {
 	fresh, ok, err := c.yt.GetBroadcast(ctx, id)
 	if err != nil {
-		c.log.Error("operation_failed", "operation", "save_verify", "id", id, "error", err)
-		return
+		c.log.Error("operation_failed", "operation", "update_verify", "id", id, "error", err)
+		return youtube.Broadcast{}, err
 	}
 	if !ok {
 		c.log.Warn("broadcast_missing", "id", id)
-		c.deselectMissing(ctx, id)
-		return
+		c.dropMissing(ctx, id)
+		return youtube.Broadcast{}, errors.New("broadcast no longer exists on YouTube")
 	}
-	if title != "" {
-		fresh.Title = title
-	}
-	if !start.IsZero() {
-		fresh.ScheduledStart = start
-	}
+	mutate(&fresh)
 	if _, err := c.yt.UpdateBroadcast(ctx, fresh); err != nil {
-		c.log.Error("operation_failed", "operation", "save_update", "id", id, "error", err)
-		return
+		c.log.Error("operation_failed", "operation", "update_write", "id", id, "error", err)
+		return youtube.Broadcast{}, err
 	}
-	c.uploadThumbnail(ctx, id, thumbnail)
-
 	readback, ok, err := c.yt.GetBroadcast(ctx, id)
 	if err != nil || !ok {
-		c.log.Error("operation_failed", "operation", "save_readback", "id", id, "error", err)
-		return
+		c.log.Error("operation_failed", "operation", "update_readback", "id", id, "error", err)
+		return youtube.Broadcast{}, fmt.Errorf("read back after update: %w", err)
 	}
-	c.log.Info("broadcast_saved", "id", id, "title", readback.Title, "scheduledStart", readback.ScheduledStart)
+	c.log.Info("broadcast_updated", "id", id, "title", readback.Title, "privacy", readback.PrivacyStatus, "scheduledStart", readback.ScheduledStart)
+	c.applyAndPublish(ctx, readback)
+	return readback, nil
+}
+
+func (c *Controller) applyAndPublish(ctx context.Context, b youtube.Broadcast) {
 	c.mu.Lock()
-	c.session.apply(readback)
-	if c.session.selectedID == id {
-		c.session.loadDrafts()
-	}
+	c.session.apply(b)
 	c.mu.Unlock()
 	c.pub.update(ctx, c.snapshot)
 }
 
-func (c *Controller) create(ctx context.Context) {
-	c.mu.Lock()
-	selected := c.session.selectedID
-	title := c.session.draftTitle
-	start := c.session.draftStart
-	thumbnail := c.session.thumbnail
-	c.mu.Unlock()
-	if selected != "" {
-		c.log.Warn("create_rejected", "reason", "existing_broadcast_selected")
-		return
-	}
-	if title == "" {
-		c.log.Warn("create_rejected", "reason", "missing_title")
-		return
-	}
-	if start.IsZero() {
-		start = nextQuarterHour(c.now())
-		c.log.Info("create_default_start", "scheduledStart", start)
-	}
-
-	created, err := c.yt.InsertBroadcast(ctx, title, start, c.opts.Privacy)
-	if err != nil {
-		c.log.Error("operation_failed", "operation", "create_insert", "error", err)
-		return
-	}
-	c.log.Info("broadcast_created", "id", created.ID, "title", title, "scheduledStart", start, "privacy", c.opts.Privacy)
-
-	streamID, err := c.yt.DefaultStreamID(ctx)
-	switch {
-	case err != nil:
-		c.log.Error("operation_failed", "operation", "create_find_stream", "id", created.ID, "error", err)
-	case streamID == "":
-		c.log.Warn("no_stream_key", "id", created.ID, "detail", "channel has no liveStream; Go Live stays unavailable until one is bound")
-	default:
-		if err := c.yt.Bind(ctx, created.ID, streamID); err != nil {
-			c.log.Error("operation_failed", "operation", "create_bind", "id", created.ID, "streamId", streamID, "error", err)
-		} else {
-			c.log.Info("broadcast_bound", "id", created.ID, "streamId", streamID)
-		}
-	}
-	c.uploadThumbnail(ctx, created.ID, thumbnail)
-
-	readback, ok, err := c.yt.GetBroadcast(ctx, created.ID)
-	if err != nil || !ok {
-		c.log.Error("operation_failed", "operation", "create_readback", "id", created.ID, "error", err)
-		readback = created
-	}
-	c.mu.Lock()
-	c.session.apply(readback)
-	c.session.selectedID = readback.ID
-	c.session.loadDrafts()
-	c.mu.Unlock()
-	c.pub.update(ctx, c.snapshot)
-	c.kickStatusPoll()
-}
-
-func (c *Controller) goLive(ctx context.Context) {
+func (c *Controller) goLive(ctx context.Context) error {
 	id, b, stream, ok := c.verifySelected(ctx, "go_live")
 	if !ok {
-		return
+		return ErrNoSelection
 	}
-	g := computeGates(true, &b, stream, false)
-	if !g.goLive {
-		c.log.Warn("go_live_refused", "id", id, "lifeCycleStatus", b.LifeCycleStatus, "streamStatus", stream.Status)
+	if stage(&b, stream, pendingNone) != stageReadyToGoLive {
+		c.log.Warn("command_refused", "command", "go_live", "id", id, "lifeCycleStatus", b.LifeCycleStatus, "streamStatus", stream.Status)
 		c.pub.update(ctx, c.snapshot)
-		return
+		return errors.New("stream is not active")
 	}
 	c.setPending(ctx, pendingGoLive)
 	defer c.clearPending(ctx)
@@ -142,47 +87,51 @@ func (c *Controller) goLive(ctx context.Context) {
 		c.log.Info("go_live_via_testing", "id", id)
 		if err := c.yt.Transition(ctx, id, youtube.TransitionTesting); err != nil {
 			c.log.Error("operation_failed", "operation", "transition_testing", "id", id, "error", err)
-			return
+			return err
 		}
 		if !c.waitForLifecycle(ctx, id, youtube.LifeTesting) {
-			return
+			return errors.New("broadcast did not reach testing")
 		}
 		err = c.yt.Transition(ctx, id, youtube.TransitionLive)
 	}
 	if err != nil {
 		c.log.Error("operation_failed", "operation", "transition_live", "id", id, "error", err)
-		return
+		return err
 	}
-	if c.waitForLifecycle(ctx, id, youtube.LifeLive) {
-		c.log.Info("broadcast_live", "id", id)
+	if !c.waitForLifecycle(ctx, id, youtube.LifeLive) {
+		return errors.New("broadcast did not reach live")
 	}
+	c.log.Info("broadcast_live", "id", id)
+	return nil
 }
 
-func (c *Controller) endStream(ctx context.Context) {
+func (c *Controller) endStream(ctx context.Context) error {
 	id, b, stream, ok := c.verifySelected(ctx, "end_stream")
 	if !ok {
-		return
+		return ErrNoSelection
 	}
-	if b.LifeCycleStatus != youtube.LifeLive && b.LifeCycleStatus != youtube.LifeLiveStarting {
-		c.log.Warn("end_stream_refused", "id", id, "lifeCycleStatus", b.LifeCycleStatus)
+	if !isLive(b) {
+		c.log.Warn("command_refused", "command", "end_stream", "id", id, "lifeCycleStatus", b.LifeCycleStatus)
 		c.pub.update(ctx, c.snapshot)
-		return
+		return errors.New("broadcast is not live")
 	}
 	if stream.Status == youtube.StreamActive {
-		c.log.Warn("end_stream_refused", "id", id, "reason", "stream_still_active", "detail", "waiting for stream to stop")
+		c.log.Warn("command_refused", "command", "end_stream", "id", id, "reason", "stream_still_active")
 		c.pub.update(ctx, c.snapshot)
-		return
+		return errors.New("stream is still active; stop the encoder first")
 	}
 	c.setPending(ctx, pendingEnd)
 	defer c.clearPending(ctx)
 
 	if err := c.yt.Transition(ctx, id, youtube.TransitionComplete); err != nil {
 		c.log.Error("operation_failed", "operation", "transition_complete", "id", id, "error", err)
-		return
+		return err
 	}
-	if c.waitForLifecycle(ctx, id, youtube.LifeComplete) {
-		c.log.Info("broadcast_completed", "id", id)
+	if !c.waitForLifecycle(ctx, id, youtube.LifeComplete) {
+		return errors.New("broadcast did not reach complete")
 	}
+	c.log.Info("broadcast_completed", "id", id)
+	return nil
 }
 
 // Commands decide on a fresh read, never on the last poll.
@@ -201,7 +150,7 @@ func (c *Controller) verifySelected(ctx context.Context, op string) (string, you
 	}
 	if !ok {
 		c.log.Warn("broadcast_missing", "id", id)
-		c.deselectMissing(ctx, id)
+		c.dropMissing(ctx, id)
 		return "", youtube.Broadcast{}, youtube.StreamStatus{}, false
 	}
 	var stream youtube.StreamStatus
@@ -232,10 +181,7 @@ func (c *Controller) waitForLifecycle(ctx context.Context, id, want string) bool
 			c.log.Warn("broadcast_missing", "id", id)
 			return false
 		} else {
-			c.mu.Lock()
-			c.session.apply(b)
-			c.mu.Unlock()
-			c.pub.update(ctx, c.snapshot)
+			c.applyAndPublish(ctx, b)
 			if b.LifeCycleStatus == want {
 				return true
 			}
@@ -259,52 +205,18 @@ func (c *Controller) setPending(ctx context.Context, p pendingOp) {
 func (c *Controller) clearPending(ctx context.Context) {
 	c.mu.Lock()
 	c.session.pending = pendingNone
-	// Re-armed so post-transition health and viewers land without another tap.
+	// Re-armed so the post-transition stage lands without another tap.
 	c.session.armFast(c.now(), c.opts.FastModeDuration)
 	c.mu.Unlock()
 	c.pub.update(ctx, c.snapshot)
 	c.kickStatusPoll()
 }
 
-func (c *Controller) deselectMissing(ctx context.Context, id string) {
+func (c *Controller) dropMissing(ctx context.Context, id string) {
 	c.mu.Lock()
-	c.session.setBroadcasts(slices.DeleteFunc(c.session.broadcasts, func(b youtube.Broadcast) bool { return b.ID == id }))
-	if c.session.selectedID == id {
-		c.session.selectedID = ""
-		c.session.pending = pendingNone
-		c.session.loadDrafts()
-	}
+	remaining := slices.DeleteFunc(slices.Concat(c.session.broadcasts, c.session.stale), func(b youtube.Broadcast) bool { return b.ID == id })
+	c.session.setBroadcasts(remaining, c.now())
 	c.mu.Unlock()
 	c.pub.update(ctx, c.snapshot)
-}
-
-// YouTube insists on a scheduled start; the next :00/:15/:30/:45 reads naturally on the watch page.
-func nextQuarterHour(now time.Time) time.Time {
-	floor := now.Truncate(15 * time.Minute)
-	if floor.Equal(now) {
-		return floor
-	}
-	return floor.Add(15 * time.Minute)
-}
-
-// A failed thumbnail must not fail the save or create it rides on.
-func (c *Controller) uploadThumbnail(ctx context.Context, videoID, label string) {
-	if label == keepCurrentLabel || label == "" {
-		return
-	}
-	path := filepath.Join(c.opts.ThumbnailsDir, filepath.Base(label))
-	image, err := os.ReadFile(path) //nolint:gosec // constrained to the configured thumbnails directory
-	if err != nil {
-		c.log.Error("operation_failed", "operation", "thumbnail_read", "path", path, "error", err)
-		return
-	}
-	contentType := "image/jpeg"
-	if strings.EqualFold(filepath.Ext(label), ".png") {
-		contentType = "image/png"
-	}
-	if err := c.yt.SetThumbnail(ctx, videoID, contentType, image); err != nil {
-		c.log.Error("operation_failed", "operation", "thumbnail_upload", "videoId", videoID, "file", label, "error", err)
-		return
-	}
-	c.log.Info("thumbnail_uploaded", "videoId", videoID, "file", label)
+	c.kickStatusPoll()
 }

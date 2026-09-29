@@ -21,8 +21,6 @@ type Options struct {
 	GoogleClientID     string
 	GoogleClientSecret string
 	ExternalURL        string
-	Privacy            string
-	ThumbnailsDir      string
 	ListPollInterval   time.Duration
 	FastPollInterval   time.Duration
 	FastModeDuration   time.Duration
@@ -34,8 +32,8 @@ type Options struct {
 // String renders the options without the client secret, so formatting an Options
 // value (or any struct containing one) can never leak the credential into logs.
 func (o Options) String() string {
-	return fmt.Sprintf("Options{clientID=%s externalURL=%s privacy=%s thumbnailsDir=%s listPoll=%s fastPoll=%s fastMode=%s livePoll=%s idlePoll=%s logLevel=%s}",
-		o.GoogleClientID, o.ExternalURL, o.Privacy, o.ThumbnailsDir, o.ListPollInterval, o.FastPollInterval, o.FastModeDuration, o.LivePollInterval, o.IdlePollInterval, o.LogLevel)
+	return fmt.Sprintf("Options{clientID=%s externalURL=%s listPoll=%s fastPoll=%s fastMode=%s livePoll=%s idlePoll=%s logLevel=%s}",
+		o.GoogleClientID, o.ExternalURL, o.ListPollInterval, o.FastPollInterval, o.FastModeDuration, o.LivePollInterval, o.IdlePollInterval, o.LogLevel)
 }
 
 // GoString mirrors String for %#v, which bypasses Stringer.
@@ -46,8 +44,6 @@ func (o Options) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.String("clientID", o.GoogleClientID),
 		slog.String("externalURL", o.ExternalURL),
-		slog.String("privacy", o.Privacy),
-		slog.String("thumbnailsDir", o.ThumbnailsDir),
 		slog.Duration("listPoll", o.ListPollInterval),
 		slog.Duration("fastPoll", o.FastPollInterval),
 		slog.Duration("fastMode", o.FastModeDuration),
@@ -87,17 +83,17 @@ func (m MQTT) LogValue() slog.Value {
 
 // Config is everything the binary needs to start.
 type Config struct {
-	Options   Options
-	MQTT      MQTT
-	TokenPath string
+	Options    Options
+	MQTT       MQTT
+	TokenPath  string
+	PresetsDir string
+	StatePath  string
 }
 
 type rawOptions struct {
 	GoogleClientID     *string `json:"google_client_id"`
 	GoogleClientSecret *string `json:"google_client_secret"`
 	ExternalURL        *string `json:"external_url"`
-	Privacy            *string `json:"privacy"`
-	ThumbnailsDir      *string `json:"thumbnails_dir"`
 	ListPollMinutes    *int    `json:"list_poll_minutes"`
 	FastPollSeconds    *int    `json:"fast_poll_seconds"`
 	FastModeMinutes    *int    `json:"fast_mode_minutes"`
@@ -124,8 +120,6 @@ func ParseOptions(data []byte) (Options, error) {
 		return Options{}, fmt.Errorf("options are not valid JSON: %w", err)
 	}
 	opts := Options{
-		Privacy:          "public",
-		ThumbnailsDir:    "/media/youtube-live-control",
 		ListPollInterval: 5 * time.Minute,
 		FastPollInterval: 3 * time.Second,
 		FastModeDuration: 5 * time.Minute,
@@ -141,17 +135,6 @@ func ParseOptions(data []byte) (Options, error) {
 	}
 	if raw.ExternalURL != nil {
 		opts.ExternalURL = strings.TrimRight(strings.TrimSpace(*raw.ExternalURL), "/")
-	}
-	if raw.Privacy != nil {
-		switch *raw.Privacy {
-		case "public", "unlisted", "private":
-			opts.Privacy = *raw.Privacy
-		default:
-			return Options{}, errors.New("privacy must be one of public, unlisted, private")
-		}
-	}
-	if raw.ThumbnailsDir != nil && strings.TrimSpace(*raw.ThumbnailsDir) != "" {
-		opts.ThumbnailsDir = strings.TrimSpace(*raw.ThumbnailsDir)
 	}
 	intervals := []intervalOption{
 		{"list_poll_minutes", raw.ListPollMinutes, 1, 60, time.Minute, &opts.ListPollInterval},
@@ -255,7 +238,13 @@ func Load(ctx context.Context) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	return Config{Options: opts, MQTT: mqtt, TokenPath: envOr("YLC_TOKEN_PATH", "/data/token.json")}, nil
+	return Config{
+		Options:    opts,
+		MQTT:       mqtt,
+		TokenPath:  envOr("YLC_TOKEN_PATH", "/data/token.json"),
+		PresetsDir: envOr("YLC_PRESETS_DIR", "/data/presets"),
+		StatePath:  envOr("YLC_STATE_PATH", "/data/state.json"),
+	}, nil
 }
 
 func envOr(key, fallback string) string {

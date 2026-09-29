@@ -2,7 +2,8 @@ package mqtt
 
 import (
 	"encoding/json"
-	"maps"
+
+	"github.com/jacobgad/youtube-live-control/internal/youtube"
 )
 
 // Origin identifies this add-on in discovery payloads.
@@ -23,107 +24,156 @@ func (m Message) JSON() string {
 	return string(data)
 }
 
+// Options are the dynamic option lists embedded in the selects; discovery is
+// republished whenever any of them changes and retained configs make that idempotent.
+type Options struct {
+	Broadcasts []string
+	Presets    []string
+	Dates      []string
+	Times      []string
+}
+
 const (
 	controllerName = "YouTube Live"
+	schedulingName = "YouTube Live Scheduling"
 
 	iconBroadcast = "mdi:youtube"
 	iconTitle     = "mdi:format-title"
-	iconScheduled = "mdi:calendar-clock"
-	iconThumbnail = "mdi:image"
+	iconPrivacy   = "mdi:eye-lock-outline"
 	iconFastMode  = "mdi:speedometer"
 	iconFastLeft  = "mdi:timer-outline"
+	iconStage     = "mdi:progress-check"
+	iconStart     = "mdi:calendar-clock"
 	iconHealth    = "mdi:pulse"
 	iconStatus    = "mdi:broadcast"
-	iconViewers   = "mdi:account-eye"
-	iconSave      = "mdi:content-save"
-	iconCreate    = "mdi:plus-box"
 	iconGoLive    = "mdi:play-circle"
 	iconEnd       = "mdi:stop-circle"
 	iconAuth      = "mdi:shield-account"
+	iconPreset    = "mdi:playlist-star"
+	iconDate      = "mdi:calendar"
+	iconTime      = "mdi:clock-outline"
+	iconSchedule  = "mdi:calendar-plus"
 
 	// MaxTitleLength is YouTube's limit for a broadcast title.
 	MaxTitleLength = 100
-
-	// scheduledPattern accepts "2006-01-02 15:04" (as published), the same with a
-	// T separator, and full RFC 3339; empty clears the draft.
-	scheduledPattern = `^(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(Z|[+-]\d{2}:?\d{2})?)?)?$`
 )
 
-// Messages lists every discovery config for the single YouTube Live device. The two
-// selects embed their option lists, so this is republished whenever options change;
-// retained configs make that idempotent.
-func Messages(o Origin, broadcastOptions, thumbnailOptions []string) []Message {
-	if broadcastOptions == nil {
-		broadcastOptions = []string{}
-	}
-	if thumbnailOptions == nil {
-		thumbnailOptions = []string{}
-	}
+// Messages lists every discovery config for both devices.
+func Messages(o Origin, opts Options) []Message {
 	return []Message{
-		commandEntity("select", "broadcast", "Broadcast", iconBroadcast, map[string]any{
-			"state_topic":   BroadcastState,
-			"command_topic": BroadcastSet,
-			"options":       broadcastOptions,
+		commandEntity(NodeID, "select", "broadcast", "Broadcast", iconBroadcast, map[string]any{
+			"state_topic":           BroadcastState,
+			"command_topic":         BroadcastSet,
+			"json_attributes_topic": BroadcastAttributes,
+			"options":               orEmpty(opts.Broadcasts),
 		}, o),
-		commandEntity("text", "title", "Title", iconTitle, map[string]any{
+		commandEntity(NodeID, "text", "title", "Title", iconTitle, map[string]any{
 			"state_topic":   TitleState,
 			"command_topic": TitleSet,
 			"min":           0,
 			"max":           MaxTitleLength,
 			"mode":          "text",
 		}, o),
-		commandEntity("text", "scheduled_start", "Scheduled start", iconScheduled, map[string]any{
-			"state_topic":   ScheduledState,
-			"command_topic": ScheduledSet,
-			"min":           0,
-			"max":           25,
-			"mode":          "text",
-			"pattern":       scheduledPattern,
+		commandEntity(NodeID, "select", "privacy", "Privacy", iconPrivacy, map[string]any{
+			"state_topic":   PrivacyState,
+			"command_topic": PrivacySet,
+			"options":       youtube.PrivacyOptions,
 		}, o),
-		commandEntity("select", "thumbnail", "Thumbnail", iconThumbnail, map[string]any{
-			"state_topic":   ThumbnailState,
-			"command_topic": ThumbnailSet,
-			"options":       thumbnailOptions,
-		}, o),
-		commandEntity("switch", "fast_mode", "Fast refresh", iconFastMode, map[string]any{
+		thumbnailImage(o),
+		sensor("stage", "Stage", iconStage, StageState, map[string]any{"device_class": "enum", "options": StageOptions}, "", o),
+		sensor("scheduled_start", "Scheduled start", iconStart, ScheduledStartState, map[string]any{"device_class": "timestamp"}, "", o),
+		binarySensor(NodeID, "live", "Live", LiveState, "running", o),
+		binarySensor(NodeID, "encoder", "Encoder connected", EncoderState, "connectivity", o),
+		button(NodeID, "go_live", "Go Live", iconGoLive, GoLivePress, GoLiveAvailability, o),
+		button(NodeID, "end_stream", "End Stream", iconEnd, EndPress, EndAvailability, o),
+		commandEntity(NodeID, "switch", "fast_mode", "Fast refresh", iconFastMode, map[string]any{
 			"state_topic":   FastModeState,
 			"command_topic": FastModeSet,
 			"payload_on":    PayloadOn,
 			"payload_off":   PayloadOff,
 		}, o),
-		sensor("fast_mode_remaining", "Fast refresh remaining", iconFastLeft, FastRemainingState, map[string]any{"unit_of_measurement": "min"}, o),
-		sensor("stream_health", "Stream health", iconHealth, HealthState, nil, o),
-		sensor("broadcast_status", "Broadcast status", iconStatus, StatusState, nil, o),
-		sensor("viewers", "Viewers", iconViewers, ViewersState, map[string]any{"state_class": "measurement"}, o),
-		button("save", "Save", iconSave, SavePress, SaveAvailability, o),
-		button("create", "Create", iconCreate, CreatePress, CreateAvailability, o),
-		button("go_live", "Go Live", iconGoLive, GoLivePress, GoLiveAvailability, o),
-		button("end_stream", "End Stream", iconEnd, EndPress, EndAvailability, o),
+		sensor("fast_mode_remaining", "Fast refresh remaining", iconFastLeft, FastRemainingState, map[string]any{"unit_of_measurement": "min"}, "", o),
+		sensor("broadcast_status", "Broadcast status", iconStatus, StatusState, nil, "diagnostic", o),
+		sensor("stream_health", "Stream health", iconHealth, HealthState, nil, "diagnostic", o),
+		sensor("channel", "Channel", iconBroadcast, ChannelState, nil, "diagnostic", o),
 		authSensor(o),
-		channelSensor(o),
+
+		commandEntity(SchedulingNodeID, "select", "preset", "Preset", iconPreset, map[string]any{
+			"state_topic":   PresetState,
+			"command_topic": PresetSet,
+			"options":       orEmpty(opts.Presets),
+		}, o),
+		commandEntity(SchedulingNodeID, "select", "date", "Date", iconDate, map[string]any{
+			"state_topic":   DateState,
+			"command_topic": DateSet,
+			"options":       orEmpty(opts.Dates),
+		}, o),
+		commandEntity(SchedulingNodeID, "select", "time", "Time", iconTime, map[string]any{
+			"state_topic":   TimeState,
+			"command_topic": TimeSet,
+			"options":       orEmpty(opts.Times),
+		}, o),
+		button(SchedulingNodeID, "schedule", "Schedule", iconSchedule, SchedulePress, ScheduleAvailability, o),
 	}
 }
 
-func commandEntity(component, object, name, icon string, fields map[string]any, o Origin) Message {
+func orEmpty(list []string) []string {
+	if list == nil {
+		return []string{}
+	}
+	return list
+}
+
+func commandEntity(node, component, object, name, icon string, fields map[string]any, o Origin) Message {
 	fields["optimistic"] = false
 	fields["retain"] = false
 	fields["qos"] = 1
-	m := base(component, object, name, icon, fields, o)
+	m := base(node, component, object, name, icon, fields, o)
 	m.Payload["availability"] = []map[string]any{controllerAvailability(), authAvailability()}
 	m.Payload["availability_mode"] = "all"
 	return m
 }
 
-func sensor(object, name, icon, stateTopic string, extra map[string]any, o Origin) Message {
+func sensor(object, name, icon, stateTopic string, extra map[string]any, category string, o Origin) Message {
 	fields := map[string]any{"state_topic": stateTopic}
-	maps.Copy(fields, extra)
-	m := base("sensor", object, name, icon, fields, o)
+	for k, v := range extra {
+		fields[k] = v
+	}
+	m := base(NodeID, "sensor", object, name, icon, fields, o)
+	m.Payload["availability"] = []map[string]any{controllerAvailability()}
+	if category != "" {
+		m.Payload["entity_category"] = category
+	}
+	return m
+}
+
+// A core image entity is the platform-native way to show the thumbnail; MQTT drops
+// entity_picture from json attributes, so an attribute could never do this.
+func thumbnailImage(o Origin) Message {
+	m := base(NodeID, "image", "thumbnail", "Thumbnail", "", map[string]any{"url_topic": ThumbnailURLState}, o)
+	delete(m.Payload, "icon")
+	m.Payload["availability"] = []map[string]any{
+		controllerAvailability(),
+		{"topic": ThumbnailAvail, "payload_available": PayloadOnline, "payload_not_available": PayloadOffline},
+	}
+	m.Payload["availability_mode"] = "all"
+	return m
+}
+
+func binarySensor(node, object, name, stateTopic, deviceClass string, o Origin) Message {
+	m := base(node, "binary_sensor", object, name, "", map[string]any{
+		"state_topic":  stateTopic,
+		"payload_on":   PayloadOn,
+		"payload_off":  PayloadOff,
+		"device_class": deviceClass,
+	}, o)
+	delete(m.Payload, "icon")
 	m.Payload["availability"] = []map[string]any{controllerAvailability()}
 	return m
 }
 
-func button(object, name, icon, pressTopic, availabilityTopic string, o Origin) Message {
-	m := base("button", object, name, icon, map[string]any{
+func button(node, object, name, icon, pressTopic, availabilityTopic string, o Origin) Message {
+	m := base(node, "button", object, name, icon, map[string]any{
 		"command_topic": pressTopic,
 		"payload_press": PayloadPress,
 		"retain":        false,
@@ -139,29 +189,28 @@ func button(object, name, icon, pressTopic, availabilityTopic string, o Origin) 
 }
 
 func authSensor(o Origin) Message {
-	m := base("sensor", "authorization", "Authorization", iconAuth, map[string]any{"state_topic": AuthState}, o)
+	m := base(NodeID, "sensor", "authorization", "Authorization", iconAuth, map[string]any{"state_topic": AuthState}, o)
 	m.Payload["entity_category"] = "diagnostic"
 	m.Payload["availability"] = []map[string]any{controllerAvailability()}
 	return m
 }
 
-func channelSensor(o Origin) Message {
-	m := base("sensor", "channel", "Channel", iconBroadcast, map[string]any{"state_topic": ChannelState}, o)
-	m.Payload["entity_category"] = "diagnostic"
-	m.Payload["availability"] = []map[string]any{controllerAvailability(), authAvailability()}
-	m.Payload["availability_mode"] = "all"
-	return m
-}
-
-func base(component, object, name, icon string, fields map[string]any, o Origin) Message {
-	payload := maps.Clone(fields)
+func base(node, component, object, name, icon string, fields map[string]any, o Origin) Message {
+	payload := make(map[string]any, len(fields)+8)
+	for k, v := range fields {
+		payload[k] = v
+	}
 	payload["name"] = name
-	payload["unique_id"] = NodeID + "_" + object
-	payload["object_id"] = NodeID + "_" + object
+	payload["unique_id"] = node + "_" + object
+	payload["object_id"] = node + "_" + object
 	payload["icon"] = icon
-	payload["device"] = device(o)
 	payload["origin"] = origin(o)
-	return Message{Topic: HADiscoveryTopic(component, object), Payload: payload}
+	if node == SchedulingNodeID {
+		payload["device"] = schedulingDevice(o)
+	} else {
+		payload["device"] = controllerDevice(o)
+	}
+	return Message{Topic: HADiscoveryTopic(component, node, object), Payload: payload}
 }
 
 func origin(o Origin) map[string]any {
@@ -176,12 +225,23 @@ func authAvailability() map[string]any {
 	return map[string]any{"topic": AuthState, "payload_available": PayloadAuthorized, "payload_not_available": PayloadUnauthorized}
 }
 
-func device(o Origin) map[string]any {
+func controllerDevice(o Origin) map[string]any {
 	return map[string]any{
 		"identifiers":  []string{Identifier},
 		"name":         controllerName,
 		"manufacturer": "youtube-live-control add-on",
-		"model":        "YouTube Live MQTT bridge",
+		"model":        "Selected broadcast",
 		"sw_version":   o.Version,
+	}
+}
+
+func schedulingDevice(o Origin) map[string]any {
+	return map[string]any{
+		"identifiers":  []string{SchedulingIdentifier},
+		"name":         schedulingName,
+		"manufacturer": "youtube-live-control add-on",
+		"model":        "Scheduling from presets",
+		"sw_version":   o.Version,
+		"via_device":   Identifier,
 	}
 }

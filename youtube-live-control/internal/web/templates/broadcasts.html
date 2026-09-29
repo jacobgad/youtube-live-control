@@ -1,0 +1,43 @@
+{{define "content"}}
+{{with .Data}}
+<div class="card">
+<form method="get" action="{{$.Base}}/broadcasts/new" class="row">
+<div class="grow">
+<label for="preset">Schedule a new stream from a preset</label>
+<select id="preset" name="preset" required>
+<option value="">Choose a preset…</option>
+{{range .Presets}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
+</select>
+</div>
+<div><button type="submit" class="primary" {{if not .Presets}}disabled{{end}}>Next</button></div>
+</form>
+{{if not .Presets}}<p class="muted">No presets yet — <a href="{{$.Base}}/presets/new">create one</a> with the title pattern, description, privacy, stream key and thumbnail your services use.</p>{{end}}
+</div>
+
+<h2>Upcoming</h2>
+{{if not .Listing.Broadcasts}}<div class="card muted">Nothing scheduled on this channel.</div>{{end}}
+{{range .Listing.Broadcasts}}
+<div class="card row">
+<div class="grow">
+<div><strong><a href="{{$.Base}}/broadcasts/{{.ID}}">{{.Title}}</a></strong></div>
+<div class="muted">{{localTime .ScheduledStart}} · {{.PrivacyStatus}}{{if not .BoundStreamID}} · <span class="badge warn">no stream key</span>{{end}}</div>
+</div>
+<div>
+{{if or (eq .LifeCycleStatus "live") (eq .LifeCycleStatus "liveStarting")}}<span class="badge live">live</span>{{else}}<span class="badge">{{.LifeCycleStatus}}</span>{{end}}
+{{if eq .ID $.Data.Listing.SelectedID}}<span class="badge selected">on the panel</span>{{end}}
+</div>
+</div>
+{{end}}
+
+{{if .Listing.Stale}}
+<h2>Never started</h2>
+<p class="muted">Scheduled more than a day ago and never went live. Hidden from the Home Assistant panel; delete them in YouTube Studio when convenient.</p>
+{{range .Listing.Stale}}
+<div class="card row stale">
+<div class="grow"><strong><a href="{{$.Base}}/broadcasts/{{.ID}}">{{.Title}}</a></strong><div class="muted">{{localTime .ScheduledStart}}</div></div>
+<div><span class="badge">{{.LifeCycleStatus}}</span></div>
+</div>
+{{end}}
+{{end}}
+{{end}}
+{{end}}

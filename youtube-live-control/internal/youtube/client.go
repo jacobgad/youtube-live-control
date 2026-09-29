@@ -10,7 +10,6 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
-	"strconv"
 	"time"
 )
 
@@ -18,8 +17,22 @@ const (
 	apiBase    = "https://www.googleapis.com/youtube/v3"
 	uploadBase = "https://www.googleapis.com/upload/youtube/v3"
 
-	maxThumbnailBytes = 2 << 20
+	// MaxThumbnailBytes is YouTube's thumbnail upload limit.
+	MaxThumbnailBytes = 2 << 20
 )
+
+// PrivacyOptions are the privacy statuses a broadcast can have.
+var PrivacyOptions = []string{"public", "unlisted", "private"}
+
+// ValidPrivacy reports whether p is one of PrivacyOptions.
+func ValidPrivacy(p string) bool {
+	for _, o := range PrivacyOptions {
+		if o == p {
+			return true
+		}
+	}
+	return false
+}
 
 // Broadcast lifecycle and stream status values as reported by the API.
 const (
@@ -42,12 +55,26 @@ const (
 type Broadcast struct {
 	ID              string
 	Title           string
+	Description     string
 	ScheduledStart  time.Time
 	PrivacyStatus   string
 	LifeCycleStatus string
 	BoundStreamID   string
 	MonitorEnabled  bool
+	IsDefault       bool
+	ThumbnailURL    string
 	parts           rawParts
+}
+
+// Stream is a liveStream resource: the encoder's stream key and its ingestion settings.
+type Stream struct {
+	ID         string
+	Title      string
+	StreamKey  string
+	Resolution string
+	FrameRate  string
+	IsReusable bool
+	Status     string
 }
 
 // rawParts is the resource exactly as YouTube returned it. An update PUT overwrites
@@ -105,16 +132,34 @@ func (i apiBroadcastItem) broadcast() Broadcast {
 	b := Broadcast{
 		ID:              i.ID,
 		Title:           stringField(parts.Snippet, "title"),
+		Description:     stringField(parts.Snippet, "description"),
 		PrivacyStatus:   stringField(parts.Status, "privacyStatus"),
 		LifeCycleStatus: stringField(parts.Status, "lifeCycleStatus"),
 		BoundStreamID:   stringField(parts.ContentDetails, "boundStreamId"),
+		ThumbnailURL:    thumbnailURL(parts.Snippet),
 		parts:           parts,
 	}
 	b.ScheduledStart, _ = time.Parse(time.RFC3339, stringField(parts.Snippet, "scheduledStartTime"))
+	b.IsDefault, _ = parts.Snippet["isDefaultBroadcast"].(bool)
 	if monitor, ok := parts.ContentDetails["monitorStream"].(map[string]any); ok {
 		b.MonitorEnabled, _ = monitor["enableMonitorStream"].(bool)
 	}
 	return b
+}
+
+func thumbnailURL(snippet map[string]any) string {
+	thumbs, ok := snippet["thumbnails"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	for _, size := range []string{"maxres", "standard", "high", "medium", "default"} {
+		if t, ok := thumbs[size].(map[string]any); ok {
+			if u := stringField(t, "url"); u != "" {
+				return u
+			}
+		}
+	}
+	return ""
 }
 
 func decodeMap(raw json.RawMessage) map[string]any {
@@ -134,13 +179,15 @@ type broadcastListResponse struct {
 
 const broadcastParts = "id,snippet,status,contentDetails"
 
-// ListBroadcasts fetches the channel's broadcasts by lifecycle filter
-// ("upcoming" or "active"). Costs 1 quota unit.
+// ListBroadcasts fetches the channel's scheduled ("event") broadcasts by lifecycle
+// filter, "upcoming" or "active"; the persistent default broadcast is excluded.
+// Costs 1 quota unit.
 func (c *Client) ListBroadcasts(ctx context.Context, broadcastStatus string) ([]Broadcast, error) {
 	var out broadcastListResponse
 	err := c.do(ctx, http.MethodGet, apiBase+"/liveBroadcasts", url.Values{
 		"part":            {broadcastParts},
 		"broadcastStatus": {broadcastStatus},
+		"broadcastType":   {"event"},
 		"maxResults":      {"50"},
 	}, nil, &out)
 	if err != nil {
@@ -175,6 +222,7 @@ func (c *Client) GetBroadcast(ctx context.Context, id string) (Broadcast, bool, 
 type insertBody struct {
 	Snippet struct {
 		Title              string `json:"title"`
+		Description        string `json:"description,omitempty"`
 		ScheduledStartTime string `json:"scheduledStartTime"`
 	} `json:"snippet"`
 	Status struct {
@@ -190,11 +238,20 @@ type insertBody struct {
 	} `json:"contentDetails"`
 }
 
-func newInsertBody(title string, start time.Time, privacy string) insertBody {
+// NewBroadcast is the input to InsertBroadcast.
+type NewBroadcast struct {
+	Title       string
+	Description string
+	Start       time.Time
+	Privacy     string
+}
+
+func newInsertBody(n NewBroadcast) insertBody {
 	var body insertBody
-	body.Snippet.Title = title
-	body.Snippet.ScheduledStartTime = start.UTC().Format(time.RFC3339)
-	body.Status.PrivacyStatus = privacy
+	body.Snippet.Title = n.Title
+	body.Snippet.Description = n.Description
+	body.Snippet.ScheduledStartTime = n.Start.UTC().Format(time.RFC3339)
+	body.Status.PrivacyStatus = n.Privacy
 	return body
 }
 
@@ -209,6 +266,7 @@ var readOnlyFields = map[string][]string{
 func updateBody(b Broadcast) map[string]any {
 	snippet := cloneOrEmpty(b.parts.Snippet)
 	snippet["title"] = b.Title
+	snippet["description"] = b.Description
 	snippet["scheduledStartTime"] = b.ScheduledStart.UTC().Format(time.RFC3339)
 	status := cloneOrEmpty(b.parts.Status)
 	status["privacyStatus"] = b.PrivacyStatus
@@ -233,17 +291,17 @@ func cloneOrEmpty(m map[string]any) map[string]any {
 
 // InsertBroadcast creates a scheduled broadcast with auto start/stop off and the
 // monitor stream disabled, so ready → live is a single transition. Costs 50 quota units.
-func (c *Client) InsertBroadcast(ctx context.Context, title string, start time.Time, privacy string) (Broadcast, error) {
+func (c *Client) InsertBroadcast(ctx context.Context, n NewBroadcast) (Broadcast, error) {
 	var out apiBroadcastItem
-	err := c.do(ctx, http.MethodPost, apiBase+"/liveBroadcasts", url.Values{"part": {broadcastParts}}, newInsertBody(title, start, privacy), &out)
+	err := c.do(ctx, http.MethodPost, apiBase+"/liveBroadcasts", url.Values{"part": {broadcastParts}}, newInsertBody(n), &out)
 	if err != nil {
 		return Broadcast{}, err
 	}
 	return out.broadcast(), nil
 }
 
-// UpdateBroadcast writes b's title, scheduled start and privacy over the broadcast
-// as last fetched, keeping auto start/stop off. Costs 50 quota units.
+// UpdateBroadcast writes b's title, description, scheduled start and privacy over the
+// broadcast as last fetched, keeping auto start/stop off. Costs 50 quota units.
 func (c *Client) UpdateBroadcast(ctx context.Context, b Broadcast) (Broadcast, error) {
 	var out apiBroadcastItem
 	err := c.do(ctx, http.MethodPut, apiBase+"/liveBroadcasts", url.Values{"part": {broadcastParts}}, updateBody(b), &out)
@@ -271,19 +329,31 @@ func (c *Client) Bind(ctx context.Context, broadcastID, streamID string) error {
 	}, nil, nil)
 }
 
+type streamItem struct {
+	ID      string `json:"id"`
+	Snippet struct {
+		Title string `json:"title"`
+	} `json:"snippet"`
+	CDN struct {
+		Resolution    string `json:"resolution"`
+		FrameRate     string `json:"frameRate"`
+		IngestionInfo struct {
+			StreamName string `json:"streamName"`
+		} `json:"ingestionInfo"`
+	} `json:"cdn"`
+	Status struct {
+		StreamStatus string `json:"streamStatus"`
+		HealthStatus struct {
+			Status string `json:"status"`
+		} `json:"healthStatus"`
+	} `json:"status"`
+	ContentDetails struct {
+		IsReusable bool `json:"isReusable"`
+	} `json:"contentDetails"`
+}
+
 type streamListResponse struct {
-	Items []struct {
-		ID     string `json:"id"`
-		Status struct {
-			StreamStatus string `json:"streamStatus"`
-			HealthStatus struct {
-				Status string `json:"status"`
-			} `json:"healthStatus"`
-		} `json:"status"`
-		ContentDetails struct {
-			IsReusable bool `json:"isReusable"`
-		} `json:"contentDetails"`
-	} `json:"items"`
+	Items []streamItem `json:"items"`
 }
 
 // StreamStatus fetches the ingestion status of one liveStream. Costs 1 quota unit.
@@ -302,30 +372,33 @@ func (c *Client) StreamStatus(ctx context.Context, streamID string) (StreamStatu
 	return StreamStatus{Status: out.Items[0].Status.StreamStatus, Health: out.Items[0].Status.HealthStatus.Status}, nil
 }
 
-// DefaultStreamID picks the channel's reusable liveStream (the persistent stream key
-// OBS is configured with), falling back to the first stream. Costs 1 quota unit.
-func (c *Client) DefaultStreamID(ctx context.Context) (string, error) {
+// ListStreams lists the channel's stream keys. Costs 1 quota unit.
+func (c *Client) ListStreams(ctx context.Context) ([]Stream, error) {
 	var out streamListResponse
 	err := c.do(ctx, http.MethodGet, apiBase+"/liveStreams", url.Values{
-		"part":       {"id,contentDetails"},
+		"part":       {"id,snippet,cdn,status,contentDetails"},
 		"mine":       {"true"},
 		"maxResults": {"50"},
 	}, nil, &out)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
+	streams := make([]Stream, 0, len(out.Items))
 	for _, item := range out.Items {
-		if item.ContentDetails.IsReusable {
-			return item.ID, nil
-		}
+		streams = append(streams, Stream{
+			ID:         item.ID,
+			Title:      item.Snippet.Title,
+			StreamKey:  item.CDN.IngestionInfo.StreamName,
+			Resolution: item.CDN.Resolution,
+			FrameRate:  item.CDN.FrameRate,
+			IsReusable: item.ContentDetails.IsReusable,
+			Status:     item.Status.StreamStatus,
+		})
 	}
-	if len(out.Items) > 0 {
-		return out.Items[0].ID, nil
-	}
-	return "", nil
+	return streams, nil
 }
 
-// Channel identifies the YouTube channel the stored token acts on. Costs 1 quota unit.
+// Channel identifies the YouTube channel the stored token acts on.
 type Channel struct {
 	ID    string
 	Title string
@@ -333,6 +406,7 @@ type Channel struct {
 
 // MyChannel returns the authenticated channel; with a Brand Account this is whichever
 // identity was picked on Google's account chooser, not the Google account itself.
+// Costs 1 quota unit.
 func (c *Client) MyChannel(ctx context.Context) (Channel, error) {
 	var out struct {
 		Items []struct {
@@ -352,33 +426,10 @@ func (c *Client) MyChannel(ctx context.Context) (Channel, error) {
 	return Channel{ID: out.Items[0].ID, Title: out.Items[0].Snippet.Title}, nil
 }
 
-// ConcurrentViewers reads the live viewer count off the video resource. Costs 1 quota unit.
-func (c *Client) ConcurrentViewers(ctx context.Context, videoID string) (int, error) {
-	var out struct {
-		Items []struct {
-			LiveStreamingDetails struct {
-				ConcurrentViewers string `json:"concurrentViewers"`
-			} `json:"liveStreamingDetails"`
-		} `json:"items"`
-	}
-	err := c.do(ctx, http.MethodGet, apiBase+"/videos", url.Values{
-		"part": {"liveStreamingDetails"},
-		"id":   {videoID},
-	}, nil, &out)
-	if err != nil {
-		return 0, err
-	}
-	if len(out.Items) == 0 {
-		return 0, nil
-	}
-	viewers, _ := strconv.Atoi(out.Items[0].LiveStreamingDetails.ConcurrentViewers)
-	return viewers, nil
-}
-
 // SetThumbnail uploads a thumbnail image for the broadcast's video. Costs 50 quota units.
 func (c *Client) SetThumbnail(ctx context.Context, videoID, contentType string, image []byte) error {
-	if len(image) > maxThumbnailBytes {
-		return fmt.Errorf("thumbnail is %d bytes; YouTube's limit is %d", len(image), maxThumbnailBytes)
+	if len(image) > MaxThumbnailBytes {
+		return fmt.Errorf("thumbnail is %d bytes; YouTube's limit is %d", len(image), MaxThumbnailBytes)
 	}
 	token, err := c.auth.AccessToken(ctx)
 	if err != nil {

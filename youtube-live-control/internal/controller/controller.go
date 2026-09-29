@@ -1,13 +1,12 @@
 // Package controller orchestrates the add-on: the broadcast selector session behind
-// the Home Assistant panel, quota-aware polling of the YouTube Data API, and command
-// handling that verifies, writes, then reads back — never publishing optimistically.
+// the Home Assistant panel, the scheduling device, quota-aware polling of the YouTube
+// Data API, and command handling that verifies, writes, then reads back — never
+// publishing optimistically.
 package controller
 
 import (
 	"context"
 	"log/slog"
-	"path/filepath"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/jacobgad/youtube-live-control/internal/config"
 	"github.com/jacobgad/youtube-live-control/internal/mqtt"
+	"github.com/jacobgad/youtube-live-control/internal/preset"
 	"github.com/jacobgad/youtube-live-control/internal/youtube"
 )
 
@@ -26,24 +26,28 @@ const (
 
 // Deps are the controller's collaborators.
 type Deps struct {
-	YouTube *youtube.Client
-	Auth    *youtube.Auth
-	MQTT    mqtt.Connection
-	Options config.Options
-	Log     *slog.Logger
-	Origin  mqtt.Origin
-	Now     func() time.Time
+	YouTube   *youtube.Client
+	Auth      *youtube.Auth
+	MQTT      mqtt.Connection
+	Presets   *preset.Store
+	StatePath string
+	Options   config.Options
+	Log       *slog.Logger
+	Origin    mqtt.Origin
+	Now       func() time.Time
 }
 
 // Controller is the add-on's long-lived core. Create it with New and drive it with Start/Stop.
 type Controller struct {
-	yt   *youtube.Client
-	auth *youtube.Auth
-	mqtt mqtt.Connection
-	opts config.Options
-	log  *slog.Logger
-	now  func() time.Time
-	pub  *publisher
+	yt        *youtube.Client
+	auth      *youtube.Auth
+	mqtt      mqtt.Connection
+	presets   *preset.Store
+	statePath string
+	opts      config.Options
+	log       *slog.Logger
+	now       func() time.Time
+	pub       *publisher
 
 	mu      sync.Mutex
 	session session
@@ -64,7 +68,8 @@ type Controller struct {
 
 type queuedOp struct {
 	name string
-	run  func(context.Context)
+	run  func(context.Context) error
+	done chan error
 }
 
 // New wires the controller to its MQTT connection; nothing talks to YouTube until Start.
@@ -81,6 +86,8 @@ func New(deps Deps) *Controller {
 		yt:         deps.YouTube,
 		auth:       deps.Auth,
 		mqtt:       deps.MQTT,
+		presets:    deps.Presets,
+		statePath:  deps.StatePath,
 		opts:       deps.Options,
 		log:        log,
 		now:        now,
@@ -92,18 +99,18 @@ func New(deps Deps) *Controller {
 		statDone:   make(chan struct{}),
 	}
 	c.lifetime, c.endLife = context.WithCancel(context.Background())
-	c.session.thumbnail = keepCurrentLabel
 
 	c.mqtt.OnMessage(mqtt.NewRouter(mqtt.Actions{
 		BroadcastSelected: c.selectBroadcast,
 		TitleEntered:      c.enterTitle,
-		ScheduledEntered:  c.enterScheduled,
-		ThumbnailSelected: c.selectThumbnail,
+		PrivacySelected:   c.selectPrivacy,
 		FastModeSwitched:  c.switchFastMode,
-		SavePressed:       func() { c.pressed("save", c.save) },
-		CreatePressed:     func() { c.pressed("create", c.create) },
 		GoLivePressed:     func() { c.pressed("go_live", c.goLive) },
 		EndPressed:        func() { c.pressed("end_stream", c.endStream) },
+		PresetSelected:    c.selectPreset,
+		DateSelected:      c.selectDate,
+		TimeSelected:      c.selectTime,
+		SchedulePressed:   c.schedulePressed,
 		HomeAssistantOnline: func() {
 			c.background(func(ctx context.Context) { c.pub.everything(ctx, c.snapshot) })
 		},
@@ -115,19 +122,25 @@ func New(deps Deps) *Controller {
 	return c
 }
 
-// Start publishes discovery and state, loads the broadcast list if already authorized,
-// and begins the two poll loops and the command worker.
+// Start publishes discovery and state, loads presets and the broadcast list if already
+// authorized, and begins the two poll loops and the command worker.
 func (c *Controller) Start(ctx context.Context) error {
 	if !c.started.CompareAndSwap(false, true) {
 		return nil
 	}
+	state, err := loadState(c.statePath)
+	if err != nil {
+		c.log.Warn("state_read_failed", "path", c.statePath, "error", err.Error())
+	}
 	c.mu.Lock()
 	c.session.authorized = c.auth.Authorized()
+	c.session.sched.presetID = state.PresetID
 	c.mu.Unlock()
+	c.loadPresets()
 	c.log.Info("controller_started", "authorized", c.auth.Authorized(), "options", c.opts)
 
 	waitCtx, cancel := context.WithTimeout(ctx, mqttStartupWait)
-	err := c.mqtt.AwaitConnection(waitCtx)
+	err = c.mqtt.AwaitConnection(waitCtx)
 	cancel()
 	if err != nil {
 		c.log.Warn("mqtt_not_ready", "detail", "continuing; state will be republished on connect")
@@ -139,6 +152,8 @@ func (c *Controller) Start(ctx context.Context) error {
 		c.identifyChannel(ctx)
 		c.refreshList(ctx)
 	}
+	c.resetScheduleDefaults()
+	c.pub.update(ctx, c.snapshot)
 
 	go c.opsLoop()
 	go c.listLoop()
@@ -191,11 +206,34 @@ func (c *Controller) background(fn func(context.Context)) {
 
 // The slot is claimed inline so presses run in press order; a full queue drops the
 // press rather than block the broker's delivery goroutine.
-func (c *Controller) enqueue(name string, op func(context.Context)) {
+func (c *Controller) enqueue(name string, op func(context.Context) error) {
 	select {
 	case c.ops <- queuedOp{name: name, run: op}:
 	default:
 		c.log.Warn("command_dropped_busy", "command", name)
+	}
+}
+
+// ctx bounds only the wait; the operation runs under lifetime. An op whose caller has
+// already given up is skipped, so a timed-out web request cannot create a duplicate.
+func (c *Controller) run(ctx context.Context, name string, op func(context.Context) error) error {
+	done := make(chan error, 1)
+	guarded := func(opCtx context.Context) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return op(opCtx)
+	}
+	select {
+	case c.ops <- queuedOp{name: name, run: guarded, done: done}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	select {
+	case err := <-done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -207,8 +245,11 @@ func (c *Controller) opsLoop() {
 			return
 		case op := <-c.ops:
 			c.log.Info("command_started", "command", op.name)
-			op.run(c.lifetime)
-			c.log.Info("command_finished", "command", op.name)
+			err := op.run(c.lifetime)
+			c.log.Info("command_finished", "command", op.name, "ok", err == nil)
+			if op.done != nil {
+				op.done <- err
+			}
 		}
 	}
 }
@@ -234,6 +275,8 @@ func (c *Controller) authChanged(ctx context.Context, authorized bool) {
 	if authorized {
 		c.identifyChannel(ctx)
 		c.refreshList(ctx)
+		c.resetScheduleDefaults()
+		c.pub.update(ctx, c.snapshot)
 		c.kickStatusPoll()
 	}
 }
@@ -257,32 +300,54 @@ func (c *Controller) snapshot() snapshot {
 	defer c.mu.Unlock()
 	b := c.session.selected()
 	now := c.now()
-	return snapshot{
-		authorized:       c.session.authorized,
-		broadcastOptions: c.session.selectOptions(),
-		thumbnailOptions: c.session.thumbnailOptions(),
-		selectedLabel:    c.session.selectedLabel(),
-		title:            c.session.draftTitle,
-		scheduled:        formatWhen(c.session.draftStart),
-		thumbnail:        c.session.thumbnail,
-		health:           healthText(b, c.session.stream),
-		status:           statusText(b, c.session.stream, c.session.pending),
-		viewers:          c.session.viewers,
-		fastMode:         c.session.fastActive(now),
-		fastRemaining:    c.session.fastRemainingMinutes(now),
-		channel:          c.session.channel,
-		gates:            computeGates(c.session.authorized, b, c.session.stream, c.session.pending != pendingNone),
+	current := stage(b, c.session.stream, c.session.pending)
+	snap := snapshot{
+		authorized: c.session.authorized,
+		channel:    c.session.channel,
+		options: mqtt.Options{
+			Broadcasts: c.session.selectOptions(),
+			Presets:    c.session.sched.presetOptions(),
+			Dates:      c.session.sched.dateOptions(now),
+			Times:      timeOptions(),
+		},
+		selectedLabel: c.session.selectedLabel(),
+		attributes:    broadcastAttributes(b),
+		stage:         current,
+		live:          isOnAir(current),
+		encoder:       b != nil && c.session.stream.Status == youtube.StreamActive,
+		health:        healthText(b, c.session.stream),
+		status:        "none",
+		fastMode:      c.session.fastActive(now),
+		fastRemaining: c.session.fastRemainingMinutes(now),
+		gates:         computeGates(c.session.authorized, current),
+		presetLabel:   c.session.sched.presetLabel(),
+		dateLabel:     c.session.sched.dateLabel(),
+		timeLabel:     c.session.sched.timeOfDay,
+		canSchedule:   c.session.authorized && c.session.sched.canSchedule(now),
+	}
+	if b != nil {
+		snap.title = b.Title
+		snap.privacy = b.PrivacyStatus
+		snap.status = b.LifeCycleStatus
+		if !b.ScheduledStart.IsZero() {
+			snap.scheduledStart = b.ScheduledStart.Format(time.RFC3339)
+		}
+		snap.thumbnailURL = b.ThumbnailURL
+	}
+	return snap
+}
+
+func (c *Controller) kickStatusPoll() {
+	select {
+	case c.statusKick <- struct{}{}:
+	default:
 	}
 }
 
 // Armed before the operation runs: a refused End press is exactly "human waiting
 // for streamStatus to catch up", the moment a fast poll is wanted most.
-func (c *Controller) pressed(name string, op func(context.Context)) {
-	c.mu.Lock()
-	c.session.armFast(c.now(), c.opts.FastModeDuration)
-	c.mu.Unlock()
-	c.log.Debug("fast_mode_armed", "reason", name+"_press")
-	c.kickStatusPoll()
+func (c *Controller) pressed(name string, op func(context.Context) error) {
+	c.armFastMode(name + "_press")
 	c.enqueue(name, op)
 }
 
@@ -301,27 +366,18 @@ func (c *Controller) switchFastMode(on bool) {
 	}
 }
 
-func (c *Controller) kickStatusPoll() {
-	select {
-	case c.statusKick <- struct{}{}:
-	default:
-	}
-}
-
 func (c *Controller) selectBroadcast(label string) {
+	c.armFastMode("broadcast_select")
 	c.mu.Lock()
-	c.session.armFast(c.now(), c.opts.FastModeDuration)
 	id, ok := c.session.idForLabel(label)
 	if !ok {
 		c.mu.Unlock()
 		c.log.Warn("select_rejected", "label", label, "reason", "unknown_option")
 		c.snapBack(mqtt.BroadcastState)
-		c.kickStatusPoll()
 		return
 	}
 	c.session.selectedID = id
-	c.session.pending = pendingNone
-	c.session.loadDrafts()
+	c.session.resetLiveState()
 	c.mu.Unlock()
 	c.log.Info("broadcast_selected", "id", id, "label", label)
 	c.publishUpdate()
@@ -336,38 +392,21 @@ func (c *Controller) enterTitle(raw string) {
 		c.snapBack(mqtt.TitleState)
 		return
 	}
-	c.mu.Lock()
-	c.session.draftTitle = title
-	c.mu.Unlock()
-	c.publishUpdate()
+	c.enqueue("title", func(ctx context.Context) error {
+		return c.editSelected(ctx, mqtt.TitleState, func(b *youtube.Broadcast) { b.Title = title })
+	})
 }
 
-func (c *Controller) enterScheduled(raw string) {
-	c.armFastMode("scheduled_start")
-	when, err := parseWhen(raw)
-	if err != nil {
-		c.log.Warn("scheduled_start_rejected", "payload", raw, "error", err.Error())
-		c.snapBack(mqtt.ScheduledState)
+func (c *Controller) selectPrivacy(privacy string) {
+	c.armFastMode("privacy")
+	if !youtube.ValidPrivacy(privacy) {
+		c.log.Warn("privacy_rejected", "payload", privacy)
+		c.snapBack(mqtt.PrivacyState)
 		return
 	}
-	c.mu.Lock()
-	c.session.draftStart = when
-	c.mu.Unlock()
-	c.publishUpdate()
-}
-
-func (c *Controller) selectThumbnail(label string) {
-	c.armFastMode("thumbnail")
-	c.mu.Lock()
-	if !c.session.validThumbnail(label) {
-		c.mu.Unlock()
-		c.log.Warn("thumbnail_rejected", "label", label, "reason", "unknown_option")
-		c.snapBack(mqtt.ThumbnailState)
-		return
-	}
-	c.session.thumbnail = label
-	c.mu.Unlock()
-	c.publishUpdate()
+	c.enqueue("privacy", func(ctx context.Context) error {
+		return c.editSelected(ctx, mqtt.PrivacyState, func(b *youtube.Broadcast) { b.PrivacyStatus = privacy })
+	})
 }
 
 func (c *Controller) armFastMode(reason string) {
@@ -387,14 +426,100 @@ func (c *Controller) snapBack(topics ...string) {
 	c.publishUpdate()
 }
 
-func scanThumbnails(dir string) []string {
-	var files []string
-	for _, pattern := range []string{"*.jpg", "*.jpeg", "*.png"} {
-		matches, _ := filepath.Glob(filepath.Join(dir, pattern))
-		for _, m := range matches {
-			files = append(files, filepath.Base(m))
-		}
+// PresetsChanged reloads presets after the web UI edits them.
+func (c *Controller) PresetsChanged() {
+	c.loadPresets()
+	c.resetScheduleDefaults()
+	c.publishUpdate()
+}
+
+func (c *Controller) loadPresets() {
+	list, err := c.presets.List()
+	if err != nil {
+		c.log.Error("presets_list_failed", "error", err.Error())
+		return
 	}
-	slices.Sort(files)
-	return files
+	c.mu.Lock()
+	c.session.sched.setPresets(list)
+	c.mu.Unlock()
+}
+
+func (c *Controller) resetScheduleDefaults() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.session.sched.applyDefaults(c.now(), c.session.allStarts())
+}
+
+func (c *Controller) selectPreset(label string) {
+	c.mu.Lock()
+	id, ok := c.session.sched.presetIDForLabel(label)
+	if !ok {
+		c.mu.Unlock()
+		c.log.Warn("preset_rejected", "label", label, "reason", "unknown_option")
+		c.snapBack(mqtt.PresetState)
+		return
+	}
+	c.session.sched.presetID = id
+	c.session.sched.applyDefaults(c.now(), c.session.allStarts())
+	c.mu.Unlock()
+	c.log.Info("preset_selected", "id", id, "name", label)
+	if err := saveState(c.statePath, persistedState{PresetID: id}); err != nil {
+		c.log.Warn("state_persist_failed", "path", c.statePath, "error", err.Error())
+	}
+	c.publishUpdate()
+}
+
+func (c *Controller) selectDate(label string) {
+	c.mu.Lock()
+	day, ok := c.session.sched.parseDateLabel(label, c.now())
+	if !ok {
+		c.mu.Unlock()
+		c.log.Warn("date_rejected", "label", label)
+		c.snapBack(mqtt.DateState)
+		return
+	}
+	c.session.sched.date = day
+	c.mu.Unlock()
+	c.publishUpdate()
+}
+
+func (c *Controller) selectTime(label string) {
+	if !preset.ValidSlot(label) {
+		c.log.Warn("time_rejected", "label", label)
+		c.snapBack(mqtt.TimeState)
+		return
+	}
+	c.mu.Lock()
+	c.session.sched.timeOfDay = label
+	c.mu.Unlock()
+	c.publishUpdate()
+}
+
+// Scheduling never touches the panel's selection; only a human does that.
+func (c *Controller) schedulePressed() {
+	c.mu.Lock()
+	p := c.session.sched.preset()
+	start := c.session.sched.start()
+	ok := c.session.sched.canSchedule(c.now())
+	c.mu.Unlock()
+	if !ok || p == nil {
+		c.log.Warn("command_refused", "command", "schedule", "reason", "gate_closed")
+		c.publishUpdate()
+		return
+	}
+	req := NewBroadcast{Edit: Edit{Title: p.Title(start), Description: p.Description, Start: start, Privacy: p.Privacy, StreamID: p.StreamID}}
+	image, ct, has, err := c.presets.Thumbnail(p.ID)
+	if err != nil {
+		c.log.Warn("preset_thumbnail_unreadable", "preset", p.ID, "error", err.Error())
+	} else if has {
+		req.Thumbnail, req.ThumbnailType = image, ct
+	}
+	c.enqueue("schedule", func(ctx context.Context) error {
+		if _, err := c.createBroadcast(ctx, req); err != nil {
+			return err
+		}
+		c.resetScheduleDefaults()
+		c.pub.update(ctx, c.snapshot)
+		return nil
+	})
 }

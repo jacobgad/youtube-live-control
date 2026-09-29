@@ -16,8 +16,7 @@ func TestRouterDispatch(t *testing.T) {
 	router := NewRouter(Actions{
 		BroadcastSelected: recordPayload("broadcast"),
 		TitleEntered:      recordPayload("title"),
-		ScheduledEntered:  recordPayload("scheduled"),
-		ThumbnailSelected: recordPayload("thumbnail"),
+		PrivacySelected:   recordPayload("privacy"),
 		FastModeSwitched: func(on bool) {
 			if on {
 				got = append(got, "fast:on")
@@ -25,24 +24,27 @@ func TestRouterDispatch(t *testing.T) {
 				got = append(got, "fast:off")
 			}
 		},
-		SavePressed:         record("save"),
-		CreatePressed:       record("create"),
 		GoLivePressed:       record("go_live"),
 		EndPressed:          record("end"),
+		PresetSelected:      recordPayload("preset"),
+		DateSelected:        recordPayload("date"),
+		TimeSelected:        recordPayload("time"),
+		SchedulePressed:     record("schedule"),
 		HomeAssistantOnline: record("ha_online"),
 	}, slog.Default())
 
 	router(BroadcastSet, []byte(" Sunday · Service "))
 	router(TitleSet, []byte("Sunday Service"))
-	router(ScheduledSet, []byte("2025-01-05 09:30"))
-	router(ThumbnailSet, []byte("cover.jpg"))
+	router(PrivacySet, []byte(" unlisted "))
 	router(FastModeSet, []byte("ON"))
 	router(FastModeSet, []byte(" off "))
 	router(FastModeSet, []byte("maybe"))
-	router(SavePress, []byte(PayloadPress))
-	router(CreatePress, []byte(PayloadPress))
 	router(GoLivePress, []byte(PayloadPress))
 	router(EndPress, []byte(PayloadPress))
+	router(PresetSet, []byte("Sunday"))
+	router(DateSet, []byte("Sun 5 Jan"))
+	router(TimeSet, []byte("09:30"))
+	router(SchedulePress, []byte(PayloadPress))
 	router(HAStatusTopic, []byte("online"))
 	router(HAStatusTopic, []byte("offline"))
 	router("ylc/unknown", []byte("x"))
@@ -50,10 +52,10 @@ func TestRouterDispatch(t *testing.T) {
 	want := []string{
 		"broadcast:Sunday · Service",
 		"title:Sunday Service",
-		"scheduled:2025-01-05 09:30",
-		"thumbnail:cover.jpg",
+		"privacy:unlisted",
 		"fast:on", "fast:off",
-		"save", "create", "go_live", "end",
+		"go_live", "end",
+		"preset:Sunday", "date:Sun 5 Jan", "time:09:30", "schedule",
 		"ha_online",
 	}
 	if len(got) != len(want) {

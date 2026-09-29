@@ -1,18 +1,21 @@
 package controller
 
 import (
+	"cmp"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/jacobgad/youtube-live-control/internal/youtube"
 )
 
-const (
-	newStreamLabel   = "New stream…"
-	keepCurrentLabel = "Keep current"
-)
+// noBroadcastLabel is the Broadcast select's state while nothing is selected and its
+// only option while nothing is scheduled; MQTT selects need at least one option.
+const noBroadcastLabel = "No broadcast selected"
 
-const displayTimeFormat = "2006-01-02 15:04"
+// staleAfter hides scheduled-but-never-started broadcasts from the volunteer's select;
+// they stay visible (greyed) in the web UI so a producer knows to clean up in Studio.
+const staleAfter = 24 * time.Hour
 
 type pendingOp int
 
@@ -22,22 +25,32 @@ const (
 	pendingEnd
 )
 
-// session is guarded by Controller.mu; an empty selectedID means New stream… and a
-// zero fastUntil means the fast-refresh window is off.
+const (
+	stageNoBroadcast       = "no_broadcast"
+	stageNoStreamKey       = "no_stream_key"
+	stageWaitingForEncoder = "waiting_for_encoder"
+	stageReadyToGoLive     = "ready_to_go_live"
+	stageStarting          = "starting"
+	stageLive              = "live"
+	stageStreamStopping    = "stream_stopping"
+	stageReadyToEnd        = "ready_to_end"
+	stageEnding            = "ending"
+	stageEnded             = "ended"
+)
+
+// session is guarded by Controller.mu; an empty selectedID means nothing selected and
+// a zero fastUntil means the fast-refresh window is off.
 type session struct {
 	authorized bool
+	channel    string
 	broadcasts []youtube.Broadcast
+	stale      []youtube.Broadcast
 	labels     []string
 	selectedID string
-	draftTitle string
-	draftStart time.Time
-	thumbnail  string
-	thumbFiles []string
 	stream     youtube.StreamStatus
-	viewers    int
 	pending    pendingOp
-	channel    string
 	fastUntil  time.Time
+	sched      scheduling
 }
 
 func (s *session) armFast(now time.Time, window time.Duration) {
@@ -56,21 +69,59 @@ func (s *session) fastRemainingMinutes(now time.Time) int {
 	return int((s.fastUntil.Sub(now) + time.Minute - 1) / time.Minute)
 }
 
-func (s *session) setBroadcasts(list []youtube.Broadcast) {
-	s.broadcasts = list
-	s.labels = broadcastLabels(list)
+// Nothing but a human changes the selection: a vanished broadcast clears it, and
+// the sorted list puts the soonest stream first so choosing is one tap.
+func (s *session) setBroadcasts(list []youtube.Broadcast, now time.Time) (selectionLost bool) {
+	s.broadcasts, s.stale = nil, nil
+	for _, b := range list {
+		if isStale(b, now) {
+			s.stale = append(s.stale, b)
+		} else {
+			s.broadcasts = append(s.broadcasts, b)
+		}
+	}
+	s.labels = broadcastLabels(s.broadcasts)
+	if s.selectedID != "" && s.selected() == nil {
+		s.selectedID = ""
+		s.resetLiveState()
+		return true
+	}
+	return false
+}
+
+func isStale(b youtube.Broadcast, now time.Time) bool {
+	return !isLive(b) && !b.ScheduledStart.IsZero() && now.Sub(b.ScheduledStart) > staleAfter
+}
+
+func isLive(b youtube.Broadcast) bool {
+	return b.LifeCycleStatus == youtube.LifeLive || b.LifeCycleStatus == youtube.LifeLiveStarting
 }
 
 func (s *session) apply(b youtube.Broadcast) {
-	for i := range s.broadcasts {
-		if s.broadcasts[i].ID == b.ID {
-			s.broadcasts[i] = b
-			s.labels = broadcastLabels(s.broadcasts)
-			return
-		}
+	if i := slices.IndexFunc(s.broadcasts, func(x youtube.Broadcast) bool { return x.ID == b.ID }); i >= 0 {
+		s.broadcasts[i] = b
+	} else {
+		s.broadcasts = append(s.broadcasts, b)
 	}
-	s.broadcasts = append(s.broadcasts, b)
+	slices.SortStableFunc(s.broadcasts, compareBroadcasts)
 	s.labels = broadcastLabels(s.broadcasts)
+}
+
+// Live first, then soonest, then title: the stream the volunteer wants is the first option.
+func compareBroadcasts(a, b youtube.Broadcast) int {
+	if isLive(a) != isLive(b) {
+		if isLive(a) {
+			return -1
+		}
+		return 1
+	}
+	if a.ScheduledStart.IsZero() != b.ScheduledStart.IsZero() {
+		if a.ScheduledStart.IsZero() {
+			return 1
+		}
+		return -1
+	}
+	return cmp.Or(a.ScheduledStart.Compare(b.ScheduledStart), cmp.Compare(a.Title, b.Title))
 }
 
 func (s *session) selected() *youtube.Broadcast {
@@ -86,26 +137,28 @@ func (s *session) selected() *youtube.Broadcast {
 	return nil
 }
 
+func (s *session) resetLiveState() {
+	s.stream = youtube.StreamStatus{}
+	s.pending = pendingNone
+}
+
 func (s *session) selectOptions() []string {
-	return append([]string{newStreamLabel}, s.labels...)
+	if len(s.labels) == 0 {
+		return []string{noBroadcastLabel}
+	}
+	return s.labels
 }
 
 func (s *session) selectedLabel() string {
-	if s.selectedID == "" {
-		return newStreamLabel
-	}
 	for i := range s.broadcasts {
 		if s.broadcasts[i].ID == s.selectedID {
 			return s.labels[i]
 		}
 	}
-	return newStreamLabel
+	return noBroadcastLabel
 }
 
 func (s *session) idForLabel(label string) (id string, ok bool) {
-	if label == newStreamLabel {
-		return "", true
-	}
 	for i, l := range s.labels {
 		if l == label {
 			return s.broadcasts[i].ID, true
@@ -114,34 +167,15 @@ func (s *session) idForLabel(label string) (id string, ok bool) {
 	return "", false
 }
 
-func (s *session) thumbnailOptions() []string {
-	return append([]string{keepCurrentLabel}, s.thumbFiles...)
-}
-
-func (s *session) validThumbnail(label string) bool {
-	if label == keepCurrentLabel {
-		return true
+func (s *session) allStarts() []time.Time {
+	starts := make([]time.Time, 0, len(s.broadcasts)+len(s.stale))
+	for _, b := range s.broadcasts {
+		starts = append(starts, b.ScheduledStart)
 	}
-	for _, f := range s.thumbFiles {
-		if f == label {
-			return true
-		}
+	for _, b := range s.stale {
+		starts = append(starts, b.ScheduledStart)
 	}
-	return false
-}
-
-func (s *session) loadDrafts() {
-	s.thumbnail = keepCurrentLabel
-	s.stream = youtube.StreamStatus{}
-	s.viewers = 0
-	b := s.selected()
-	if b == nil {
-		s.draftTitle = ""
-		s.draftStart = time.Time{}
-		return
-	}
-	s.draftTitle = b.Title
-	s.draftStart = b.ScheduledStart
+	return starts
 }
 
 func broadcastLabels(list []youtube.Broadcast) []string {
@@ -161,49 +195,58 @@ func broadcastLabels(list []youtube.Broadcast) []string {
 	return labels
 }
 
-type gates struct {
-	save   bool
-	create bool
-	goLive bool
-	end    bool
-}
-
-// End requires the stream to have stopped: streamStatus lags OBS by up to a minute,
-// and that lag is the protection against ending a broadcast still receiving frames.
-func computeGates(authorized bool, b *youtube.Broadcast, stream youtube.StreamStatus, busy bool) gates {
-	if !authorized || busy {
-		return gates{}
+// stream_stopping is live + active + noData: the encoder has gone but YouTube has not
+// noticed yet, which is exactly why End stays unavailable.
+func stage(b *youtube.Broadcast, stream youtube.StreamStatus, pending pendingOp) string {
+	switch pending {
+	case pendingGoLive:
+		return stageStarting
+	case pendingEnd:
+		return stageEnding
 	}
 	if b == nil {
-		return gates{create: true}
+		return stageNoBroadcast
+	}
+	if b.BoundStreamID == "" {
+		return stageNoStreamKey
 	}
 	active := stream.Status == youtube.StreamActive
 	switch b.LifeCycleStatus {
 	case youtube.LifeCreated, youtube.LifeReady, youtube.LifeTestStarting, youtube.LifeTesting:
-		return gates{save: true, goLive: active}
-	case youtube.LifeLiveStarting, youtube.LifeLive:
-		return gates{save: true, end: !active}
+		if active {
+			return stageReadyToGoLive
+		}
+		return stageWaitingForEncoder
+	case youtube.LifeLiveStarting:
+		return stageStarting
+	case youtube.LifeLive:
+		switch {
+		case !active:
+			return stageReadyToEnd
+		case stream.Health == "noData":
+			return stageStreamStopping
+		default:
+			return stageLive
+		}
 	default:
-		return gates{}
+		return stageEnded
 	}
 }
 
-// While live, an active stream is the only thing keeping End Stream unavailable, so
-// that combination reads as the wait rather than as a plain "live".
-func statusText(b *youtube.Broadcast, stream youtube.StreamStatus, pending pendingOp) string {
-	switch pending {
-	case pendingGoLive:
-		return "starting"
-	case pendingEnd:
-		return "ending"
+type gates struct {
+	goLive bool
+	end    bool
+}
+
+func computeGates(authorized bool, current string) gates {
+	if !authorized {
+		return gates{}
 	}
-	if b == nil {
-		return "new (not created)"
-	}
-	if b.LifeCycleStatus == youtube.LifeLive && stream.Status == youtube.StreamActive {
-		return "live (waiting for stream to stop)"
-	}
-	return b.LifeCycleStatus
+	return gates{goLive: current == stageReadyToGoLive, end: current == stageReadyToEnd}
+}
+
+func isOnAir(current string) bool {
+	return current == stageLive || current == stageStreamStopping || current == stageReadyToEnd
 }
 
 func healthText(b *youtube.Broadcast, stream youtube.StreamStatus) string {
@@ -223,24 +266,4 @@ func healthText(b *youtube.Broadcast, stream youtube.StreamStatus) string {
 		return "unknown"
 	}
 	return stream.Health
-}
-
-func formatWhen(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.Local().Format(displayTimeFormat)
-}
-
-// Zone-less input is Home Assistant's local time, which is what a volunteer types.
-func parseWhen(raw string) (time.Time, error) {
-	if raw == "" {
-		return time.Time{}, nil
-	}
-	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04:05", "2006-01-02 15:04:05", "2006-01-02T15:04", displayTimeFormat} {
-		if t, err := time.ParseInLocation(layout, raw, time.Local); err == nil {
-			return t, nil
-		}
-	}
-	return time.Time{}, fmt.Errorf("%q is not a recognised date-time; use YYYY-MM-DD HH:MM", raw)
 }

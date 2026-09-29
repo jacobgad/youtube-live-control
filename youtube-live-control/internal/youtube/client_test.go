@@ -51,7 +51,7 @@ func parseStudio(t *testing.T) Broadcast {
 
 func TestBroadcastFromAPI(t *testing.T) {
 	b := parseStudio(t)
-	if b.ID != "abc" || b.Title != "Sunday Service" || b.PrivacyStatus != "unlisted" || b.LifeCycleStatus != LifeReady || b.BoundStreamID != "s1" {
+	if b.ID != "abc" || b.Title != "Sunday Service" || b.Description != "Join us" || b.PrivacyStatus != "unlisted" || b.LifeCycleStatus != LifeReady || b.BoundStreamID != "s1" {
 		t.Fatalf("broadcast = %+v", b)
 	}
 	if !b.MonitorEnabled {
@@ -96,6 +96,17 @@ func TestUpdateBodyPreservesUnrelatedSettingsAndForcesAutoFlagsOff(t *testing.T)
 	}
 }
 
+func TestValidPrivacy(t *testing.T) {
+	for _, p := range PrivacyOptions {
+		if !ValidPrivacy(p) {
+			t.Fatalf("%s should be valid", p)
+		}
+	}
+	if ValidPrivacy("secret") || ValidPrivacy("") {
+		t.Fatal("invalid privacy accepted")
+	}
+}
+
 func TestUpdateBodyWithoutFetchedPartsStillValid(t *testing.T) {
 	body := updateBody(Broadcast{ID: "x", Title: "T", ScheduledStart: time.Now(), PrivacyStatus: "public"})
 	content := body["contentDetails"].(map[string]any)
@@ -105,12 +116,12 @@ func TestUpdateBodyWithoutFetchedPartsStillValid(t *testing.T) {
 }
 
 func TestInsertBodySerialisesAutoFlagsExplicitlyFalse(t *testing.T) {
-	data, err := json.Marshal(newInsertBody("T", time.Date(2025, 1, 5, 9, 30, 0, 0, time.UTC), "public"))
+	data, err := json.Marshal(newInsertBody(NewBroadcast{Title: "T", Description: "Join us", Start: time.Date(2025, 1, 5, 9, 30, 0, 0, time.UTC), Privacy: "public"}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	s := string(data)
-	for _, want := range []string{`"enableAutoStart":false`, `"enableAutoStop":false`, `"enableMonitorStream":false`, `"scheduledStartTime":"2025-01-05T09:30:00Z"`, `"privacyStatus":"public"`} {
+	for _, want := range []string{`"enableAutoStart":false`, `"enableAutoStop":false`, `"enableMonitorStream":false`, `"scheduledStartTime":"2025-01-05T09:30:00Z"`, `"privacyStatus":"public"`, `"description":"Join us"`} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("insert body %s lacks %s", s, want)
 		}

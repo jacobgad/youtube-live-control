@@ -1,0 +1,22 @@
+{{define "content"}}
+{{with .Data}}
+<p class="muted">A preset is everything a regular service needs — title pattern, description, privacy, stream key, thumbnail, usual day and time — so scheduling is "pick preset, confirm date".</p>
+<p><a class="button primary" href="{{$.Base}}/presets/new">New preset</a></p>
+{{if not .Presets}}<div class="card muted">No presets yet.</div>{{end}}
+{{range .Presets}}
+<div class="card row">
+{{if .ThumbnailFile}}<img class="thumb" style="max-width:8rem;margin:0" src="{{$.Base}}/presets/{{.ID}}/thumbnail" alt="">{{end}}
+<div class="grow">
+<div><strong><a href="{{$.Base}}/presets/{{.ID}}">{{.Name}}</a></strong></div>
+<div class="muted">{{.TitleTemplate}} · {{.Weekday}} {{.TimeOfDay}} · {{.Privacy}}
+{{with index $.Data.Streams .StreamID}} · {{.Title}}{{else}} · <span class="badge warn">stream key missing</span>{{end}}</div>
+</div>
+<div>
+<form class="inline" method="post" action="{{$.Base}}/presets/{{.ID}}/delete" onsubmit="return confirm('Delete preset “{{.Name}}”?');">
+<button type="submit" class="quiet">Delete</button>
+</form>
+</div>
+</div>
+{{end}}
+{{end}}
+{{end}}

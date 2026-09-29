@@ -1,7 +1,7 @@
 name: YouTube Live Control
-version: "1.1.0"
+version: "1.2.0"
 slug: youtube_live_control
-description: One-panel MQTT control for scheduled YouTube live broadcasts — pick, edit, go live, end
+description: Schedule YouTube live streams from presets, then go live and end them from one Home Assistant panel
 url: https://github.com/jacobgad/youtube-live-control
 arch:
   - aarch64
@@ -15,15 +15,10 @@ ports:
   8098/tcp: 8098
 ports_description:
   8098/tcp: OAuth redirect endpoint; only reached directly when external_url points an https proxy at it
-map:
-  - media:ro
-  - share:ro
 options:
   google_client_id: ""
   google_client_secret: ""
   external_url: ""
-  privacy: public
-  thumbnails_dir: /media/youtube-live-control
   list_poll_minutes: 5
   fast_poll_seconds: 3
   fast_mode_minutes: 5
@@ -34,8 +29,6 @@ schema:
   google_client_id: str
   google_client_secret: password
   external_url: str?
-  privacy: list(public|unlisted|private)
-  thumbnails_dir: str?
   list_poll_minutes: int(1,60)
   fast_poll_seconds: int(1,30)
   fast_mode_minutes: int(1,60)

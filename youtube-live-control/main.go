@@ -15,6 +15,7 @@ import (
 	"github.com/jacobgad/youtube-live-control/internal/config"
 	"github.com/jacobgad/youtube-live-control/internal/controller"
 	"github.com/jacobgad/youtube-live-control/internal/mqtt"
+	"github.com/jacobgad/youtube-live-control/internal/preset"
 	"github.com/jacobgad/youtube-live-control/internal/web"
 	"github.com/jacobgad/youtube-live-control/internal/youtube"
 )
@@ -52,6 +53,12 @@ func run() error {
 		log.Warn("oauth_client_missing", "detail", "set google_client_id and google_client_secret, then follow the web UI")
 	}
 
+	presets, err := preset.Open(cfg.PresetsDir)
+	if err != nil {
+		log.Error("presets_open_failed", "path", cfg.PresetsDir, "error", err.Error())
+		return err
+	}
+
 	conn, err := mqtt.Connect(ctx, mqtt.PahoOptions{
 		Settings: cfg.MQTT,
 		ClientID: fmt.Sprintf("youtube-live-control-%d", os.Getpid()),
@@ -65,16 +72,18 @@ func run() error {
 
 	yt := youtube.NewClient(auth)
 	ctrl := controller.New(controller.Deps{
-		YouTube: yt,
-		Auth:    auth,
-		MQTT:    conn,
-		Options: cfg.Options,
-		Log:     log,
-		Origin:  mqtt.Origin{Version: version, SupportURL: supportURL},
+		YouTube:   yt,
+		Auth:      auth,
+		MQTT:      conn,
+		Presets:   presets,
+		StatePath: cfg.StatePath,
+		Options:   cfg.Options,
+		Log:       log,
+		Origin:    mqtt.Origin{Version: version, SupportURL: supportURL},
 	})
 
 	webErr := make(chan error, 1)
-	go func() { webErr <- web.New(auth, yt, cfg.Options, log).Run(ctx) }()
+	go func() { webErr <- web.New(auth, ctrl, presets, cfg.Options, log).Run(ctx) }()
 
 	if err := ctrl.Start(ctx); err != nil {
 		log.Error("startup_failed", "error", err.Error())

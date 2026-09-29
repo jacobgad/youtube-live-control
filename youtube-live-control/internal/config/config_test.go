@@ -16,14 +16,8 @@ func TestParseOptionsDefaults(t *testing.T) {
 	if opts.GoogleClientID != "id" || opts.GoogleClientSecret != "secret" {
 		t.Fatalf("client not parsed: %+v", opts)
 	}
-	if opts.Privacy != "public" {
-		t.Fatalf("privacy default = %q", opts.Privacy)
-	}
 	if opts.ListPollInterval != 5*time.Minute || opts.FastPollInterval != 3*time.Second || opts.FastModeDuration != 5*time.Minute || opts.LivePollInterval != time.Minute || opts.IdlePollInterval != 10*time.Minute {
 		t.Fatalf("interval defaults = %+v", opts)
-	}
-	if opts.ThumbnailsDir != "/media/youtube-live-control" {
-		t.Fatalf("thumbnails default = %q", opts.ThumbnailsDir)
 	}
 	if opts.LogLevel != slog.LevelInfo {
 		t.Fatalf("log level default = %v", opts.LogLevel)
@@ -62,7 +56,6 @@ func TestParseOptionsExternalURLTrimmed(t *testing.T) {
 
 func TestParseOptionsRejectsBadValues(t *testing.T) {
 	for name, payload := range map[string]string{
-		"privacy":   `{"privacy":"secret"}`,
 		"fast_low":  `{"fast_poll_seconds":0}`,
 		"live_high": `{"live_poll_seconds":601}`,
 		"log_level": `{"log_level":"loud"}`,
@@ -89,7 +82,7 @@ func TestMQTTFromEnv(t *testing.T) {
 }
 
 func TestOptionsRenderingHidesClientSecret(t *testing.T) {
-	opts := Options{GoogleClientID: "id", GoogleClientSecret: "GOCSPX-hunter2", Privacy: "public"}
+	opts := Options{GoogleClientID: "id", GoogleClientSecret: "GOCSPX-hunter2"}
 	for _, rendered := range []string{opts.String(), opts.GoString(), fmt.Sprintf("%v %+v %#v", opts, opts, opts), opts.LogValue().String()} {
 		if strings.Contains(rendered, "hunter2") {
 			t.Fatalf("secret leaked: %s", rendered)

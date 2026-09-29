@@ -44,7 +44,7 @@ func TestStatusDelayTiers(t *testing.T) {
 		t.Fatalf("idle tier = %v", got)
 	}
 
-	c.session.setBroadcasts([]youtube.Broadcast{{ID: "b1", Title: "Service", LifeCycleStatus: youtube.LifeLive}})
+	c.session.setBroadcasts([]youtube.Broadcast{{ID: "b1", Title: "Service", LifeCycleStatus: youtube.LifeLive}}, time.Now())
 	c.session.selectedID = "b1"
 	if got := c.statusDelay(); got != testOptions.LivePollInterval {
 		t.Fatalf("live tier = %v", got)

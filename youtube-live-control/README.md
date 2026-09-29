@@ -1,8 +1,10 @@
 # YouTube Live Control add-on
 
-Home Assistant add-on that runs a channel's scheduled YouTube live broadcasts from one MQTT panel. A volunteer on an iPad picks or creates a broadcast, edits the title, goes live, and ends it after the service.
+Home Assistant add-on that runs a channel's scheduled YouTube live streams. Producers schedule from presets in the web UI; volunteers go live and end from one MQTT panel.
 
-- One **Broadcast** select (upcoming broadcasts + *New stream…*) with a shared detail panel: Title, Scheduled start, Thumbnail, health/status/viewer sensors, and Save / Create / Go Live / End Stream buttons
+- **Scheduling device**: Preset · Date · Time · Schedule — creates the preset's broadcast at the chosen half-hour slot
+- **Selected-broadcast device**: Broadcast select (soonest first), Title and Privacy applied immediately, a **Stage** enum sensor, Scheduled start timestamp, Live / Encoder connected binary sensors, Go Live / End Stream
+- **Web UI**: presets (title pattern, description, privacy, stream key, thumbnail, usual day/time), edit broadcasts, off-pattern scheduling
 - OAuth 2.0 (`youtube.force-ssl`) against your own Google client; consent once in the ingress web UI, refresh token kept in `/data`
 - Every write is verified and read back before Home Assistant updates; Go Live and End Stream are gated on the encoder's real stream status
 - Quota-aware tiered polling (idle 10 min / live 60 s / fast 3 s), with a **Fast refresh** switch auto-armed by any panel interaction and expired by the add-on itself

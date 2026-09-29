@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.2.0
+
+Schedule from the dashboard, operate from the dashboard; set up in the web UI.
+
+- **Two MQTT devices.** *YouTube Live* is the selected broadcast (manage & operate); *YouTube Live Scheduling* creates broadcasts from presets. Home Assistant's auto-generated dashboard gives each its own card.
+- **Presets** (web UI → Presets): name, title pattern with `{date}`, description, privacy, **stream key** (chosen from the channel's `liveStreams`), thumbnail image, usual day and time. Stored in `/data/presets/`.
+- **Scheduling device**: Preset (remembers the last used), Date (next four weeks), Time (half-hour steps), Schedule. Choosing a preset resets Date/Time to its next *free* usual slot; Schedule is greyed without a preset, without a stream key, or for a past slot. It never changes the panel's selection.
+- **Stage** sensor (`device_class: enum`) folds YouTube's lifecycle and the encoder's ingestion state into one word — `waiting_for_encoder`, `ready_to_go_live`, `live`, `stream_stopping`, `ready_to_end`, … — and drives the Go Live / End Stream availability. **Scheduled start** is a timestamp sensor (*in 20 minutes*); **Live** and **Encoder connected** binary sensors for automations; a **Thumbnail** image entity for picture cards; the Broadcast select carries `thumbnail_url`, `watch_url` and more as attributes. All derived from data already polled — zero extra quota.
+- **Panel edits apply immediately.** Title (on Enter) and the new **Privacy** select write straight to YouTube and only move on readback. **Save**, **Create**, **Scheduled start** (text), **Thumbnail**, **Viewers** and the *New stream…* pseudo-entry are gone; stale discovery configs are cleared on start. Dropping Viewers removes the `videos.list` call.
+- **Nothing selects automatically.** The Broadcast select is sorted live-first then soonest-first so the right stream is the first option; after a restart or End Stream the panel reads *No broadcast selected* until someone picks.
+- **Stale broadcasts hidden**: scheduled more than a day ago and never started → hidden from the panel, listed under *Never started* in the web UI. The channel's persistent default broadcast is excluded (`broadcastType=event`). This is what made the Broadcast select show more than the one scheduled stream.
+- **Web UI**: Broadcasts tab (list, edit title/description/date-time/privacy/stream key/thumbnail, schedule from a preset with a full form), Presets tab, Connection tab. Half-hour times everywhere.
+- Options `privacy` and `thumbnails_dir` removed; the `media`/`share` mounts are no longer needed.
+- Volunteer and producer dashboard cards (core Lovelace only) in DOCS.md.
+
 ## 1.1.0
 
 - **Channel selection for accounts that manage several YouTube channels.** Consent now always shows Google's account chooser (`prompt=select_account`), so a Brand Account channel can be picked explicitly; a scheduled stream that didn't appear in the Broadcast select was almost certainly on a different channel than the one connected. The connected channel is shown in the web UI and as a **Channel** diagnostic sensor, and logged as `channel_connected`.
