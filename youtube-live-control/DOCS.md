@@ -17,7 +17,7 @@ Requires the **Mosquitto broker** add-on and the **MQTT integration**. Broker cr
 The add-on uses your own OAuth client — there is no shared cloud project and no quota shared with anyone else.
 
 1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), create a project and enable the **YouTube Data API v3**.
-2. Configure the **OAuth consent screen** (External is fine; add the channel's Google account as a test user, or publish the app so the refresh token doesn't expire after 7 days).
+2. Configure the **OAuth consent screen** (*Google Auth Platform → Audience* in newer consoles). User type **External** is fine. While the app is in **Testing**, only accounts listed under **Test users** may sign in and refresh tokens expire after **7 days** — add the channel's Google account there to get started, then press **Publish app** once it works so the token stops expiring. Publishing a sensitive-scope app without verification just adds a "Google hasn't verified this app" interstitial (*Advanced → Go to … (unsafe)*) on the consent screen; verification itself is not needed for a private single-channel tool.
 3. Create an **OAuth client ID** of type **Desktop app** and copy the client ID and secret into the add-on options. Nothing needs registering for this type: Google permits its `http://localhost` redirect out of the box, and Google's policy rejects plain-`http` redirects to anything *but* localhost — which is why a LAN address such as `http://homeassistant.local:8098/…` cannot be used.
 4. Restart the add-on, open its web UI and press **Connect Google account**. Consent to *Manage your YouTube account* (`youtube.force-ssl`).
 5. Google then sends the browser to `http://localhost:8098/oauth/callback?…`, which shows a "can't connect" page unless that browser is running on the Home Assistant machine. That is expected — copy the whole URL from the address bar and paste it into the form on the web UI. The code in it completes the connection.
@@ -118,11 +118,12 @@ Put `.jpg`/`.png` files (max 2 MB, ideally 1280×720) into `thumbnails_dir` (def
 | `Error 400: invalid_request` / "doesn't comply with Google's OAuth 2.0 policy" | The redirect URI is plain `http` to a non-localhost address. Leave `external_url` unset (localhost redirect + paste), or set it to an **https** URL. |
 | `redirect_uri_mismatch` from Google | With `external_url` set, the OAuth client must be a **Web application** with exactly `<external_url>/oauth/callback` registered. With it unset, use a **Desktop app** client. |
 | Browser shows "can't connect" to `localhost:8098` after consenting | Expected when `external_url` is unset — the code is in the address bar. Copy the whole URL and paste it into the form on the web UI. |
-| `access_denied` / app not verified | Add the account as a test user on the consent screen, or publish the app. |
+| "Access blocked: … has not completed the Google verification process" | The consent screen is in **Testing** and the signing-in account isn't a test user. Add it under *Test users*, or **Publish app**. |
+| "Google hasn't verified this app" warning | Expected for a published, unverified app. *Advanced → Go to … (unsafe)* continues. |
 | Go Live stays unavailable | The stream isn't `active`: OBS isn't streaming, or the broadcast has no bound stream (`Stream health: no stream bound`). Selecting the broadcast and pressing Create/Save re-binds only on create; bind Studio-made broadcasts to your stream key in Studio. |
 | End Stream stays unavailable after stopping OBS | Expected for up to a minute — `streamStatus` lags. Tap End Stream once (or flip **Fast refresh** on): the refused press arms the fast poll and the button enables as soon as YouTube reports the stream stopped. |
 | Sensors feel stale | The idle tier polls every 10 minutes. Touch anything on the panel or switch **Fast refresh** on for the 3-second cadence. |
-| `authorization_revoked` in log | Google invalidated the refresh token (revoked access, password change, or 7-day test-mode expiry). Reconnect via the web UI. |
+| `authorization_revoked` in log, Authorization `unauthorized` every week | The consent screen is still in **Testing**, where refresh tokens expire after 7 days. Press **Publish app** on the consent screen, then reconnect once. (Also happens if access is revoked at myaccount.google.com or the password changes.) |
 | `quotaExceeded` errors | Daily quota exhausted; it resets at midnight Pacific. Raise the poll intervals. |
 | `supervisor did not return a usable MQTT service` | Install/start the Mosquitto broker add-on. |
 | `mqtt_disconnected` / `mqtt_connect_error` | Broker is down; the add-on reconnects and republishes on its own. |
