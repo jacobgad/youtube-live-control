@@ -114,7 +114,7 @@ Both devices appear under **Settings → Devices & services → MQTT**; Home Ass
 
 ## Safety
 
-Every write is verified against YouTube first and read back before Home Assistant is updated. State is retained on MQTT, commands are not, and replayed commands are ignored, so restarts never start or stop a stream.
+Every write is verified against YouTube first and read back before Home Assistant is updated. State is retained on MQTT, commands are not, and replayed commands are ignored, so restarts never start or stop a stream. While a command runs its button is unavailable and a repeat press is ignored, so a double tap cannot schedule twice or transition twice.
 
 - Broadcasts are written with `enableAutoStart` and `enableAutoStop` **false**: OBS starting or stopping never transitions a broadcast; only the buttons do.
 - **Go Live** requires YouTube to report the stream `active`. **End Stream** requires the stream to have stopped, which YouTube reports up to a minute after OBS stops — the `stream_stopping` stage.

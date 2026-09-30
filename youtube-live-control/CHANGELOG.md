@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.1
+
+- Double-tap protection: one in-flight instance per command. While Go Live, End Stream or Schedule runs, its button is unavailable in Home Assistant; a second press is ignored and logged. Web forms disable their buttons on submit, and a duplicate request is refused with "already in progress".
+
 ## 1.7.0
 
 - Scheduling device: **Start** is one date-time entity again (Home Assistant's native picker), reversing 1.3.2's Date/Time split; the retired configs are cleared on start.

@@ -238,11 +238,11 @@ type gates struct {
 	end    bool
 }
 
-func computeGates(authorized bool, current string) gates {
+func computeGates(authorized bool, current string, goLiveBusy, endBusy bool) gates {
 	if !authorized {
 		return gates{}
 	}
-	return gates{goLive: current == stageReadyToGoLive, end: current == stageReadyToEnd}
+	return gates{goLive: current == stageReadyToGoLive && !goLiveBusy, end: current == stageReadyToEnd && !endBusy}
 }
 
 func isOnAir(current string) bool {

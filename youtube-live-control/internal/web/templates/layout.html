@@ -25,5 +25,13 @@
 {{if .Notice}}<p class="notice">{{.Notice}}</p>{{end}}
 {{template "content" .}}
 </main>
+<script>
+document.addEventListener('submit', function () {
+  document.querySelectorAll('button[type=submit], .button').forEach(function (b) {
+    b.disabled = true;
+    b.classList.add('busy');
+  });
+});
+</script>
 </body>
 </html>

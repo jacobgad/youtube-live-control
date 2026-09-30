@@ -125,7 +125,7 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 .button.quiet, button.quiet { border-color: var(--line); background: transparent; }
 .button.danger, button.danger { border-color: var(--bad-text); color: var(--bad-text); background: transparent; }
 button.small { min-height: 2rem; padding: 0 0.7rem; font-size: 0.85rem; }
-button[disabled] { opacity: 0.45; cursor: default; }
+button[disabled], .button.busy { opacity: 0.45; cursor: default; pointer-events: none; }
 
 .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; margin-top: 1.4rem; }
 .actions .spacer { flex: 1; }
