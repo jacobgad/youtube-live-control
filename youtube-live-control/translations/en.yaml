@@ -1,0 +1,25 @@
+configuration:
+  google_client_id:
+    name: Google client ID
+    description: From your Google Cloud project's OAuth client (type Desktop app).
+  google_client_secret:
+    name: Google client secret
+    description: The client secret shown with the client ID.
+  oauth_redirect_base_url:
+    name: OAuth redirect base URL
+    description: Leave empty unless a public https hostname forwards to this add-on's port 8098. When set, Google redirects to <url>/oauth/callback and the paste step is skipped.
+  refresh_idle_seconds:
+    name: Idle refresh
+    description: Seconds between checks of the broadcast list and the selected broadcast while nothing is happening. Default 600.
+  refresh_live_seconds:
+    name: Live refresh
+    description: Seconds between checks of the selected broadcast while it is on air. Default 60.
+  refresh_fast_seconds:
+    name: Fast refresh
+    description: Seconds between checks while fast refresh is on. Default 3.
+  fast_refresh_duration_seconds:
+    name: Fast refresh duration
+    description: Seconds that fast refresh stays on after anyone touches the Home Assistant entities. Default 300.
+  log_level:
+    name: Log level
+    description: debug shows every poll; info is the normal setting.

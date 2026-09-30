@@ -25,6 +25,7 @@ type Preset struct {
 	Weekday       time.Weekday
 	TimeOfDay     string
 	ImageID       string
+	CategoryID    string
 }
 
 // Validate reports the first problem as a user-facing message.

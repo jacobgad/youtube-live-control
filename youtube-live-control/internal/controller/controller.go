@@ -1,4 +1,4 @@
-// Package controller owns the panel session, polling and every command's
+// Package controller owns the Home Assistant session, polling and every command's
 // verify → write → read back path; nothing is published optimistically.
 package controller
 
@@ -259,9 +259,9 @@ func (c *Controller) authChanged(ctx context.Context, authorized bool) {
 	c.mu.Lock()
 	c.session.authorized = authorized
 	if authorized {
-		c.session.armFast(c.now(), c.opts.FastModeDuration)
+		c.session.armFast(c.now(), c.opts.FastRefreshDuration)
 	} else {
-		c.session.channel = ""
+		c.session.channel, c.session.country = "", ""
 	}
 	c.mu.Unlock()
 	c.log.Info("authorization_changed", "authorized", authorized)
@@ -285,8 +285,9 @@ func (c *Controller) identifyChannel(ctx context.Context) {
 	}
 	c.mu.Lock()
 	c.session.channel = channel.Title
+	c.session.country = channel.Country
 	c.mu.Unlock()
-	c.log.Info("channel_connected", "channelId", channel.ID, "title", channel.Title)
+	c.log.Info("channel_connected", "channelId", channel.ID, "title", channel.Title, "country", channel.Country)
 }
 
 func (c *Controller) snapshot() snapshot {
@@ -346,7 +347,7 @@ func (c *Controller) pressed(name string, op func(context.Context) error) {
 func (c *Controller) switchFastMode(on bool) {
 	c.mu.Lock()
 	if on {
-		c.session.armFast(c.now(), c.opts.FastModeDuration)
+		c.session.armFast(c.now(), c.opts.FastRefreshDuration)
 	} else {
 		c.session.fastUntil = time.Time{}
 	}
@@ -403,7 +404,7 @@ func (c *Controller) selectPrivacy(privacy string) {
 
 func (c *Controller) armFastMode(reason string) {
 	c.mu.Lock()
-	c.session.armFast(c.now(), c.opts.FastModeDuration)
+	c.session.armFast(c.now(), c.opts.FastRefreshDuration)
 	c.mu.Unlock()
 	c.log.Debug("fast_mode_armed", "reason", reason)
 	c.kickStatusPoll()
@@ -489,7 +490,7 @@ func (c *Controller) enterTime(raw string) {
 	c.publishUpdate()
 }
 
-// Scheduling never touches the panel's selection; only a human does that.
+// Scheduling never touches the Home Assistant selection; only a human does that.
 func (c *Controller) schedulePressed() {
 	c.mu.Lock()
 	p := c.session.sched.preset()
@@ -501,7 +502,7 @@ func (c *Controller) schedulePressed() {
 		c.publishUpdate()
 		return
 	}
-	req := NewBroadcast{Edit: Edit{Title: p.Title(start), Description: p.Description, Start: start, Privacy: p.Privacy, StreamID: p.StreamID}}
+	req := NewBroadcast{Edit: Edit{Title: p.Title(start), Description: p.Description, Start: start, Privacy: p.Privacy, StreamID: p.StreamID, CategoryID: p.CategoryID}}
 	if p.ImageID != "" {
 		image, ct, err := c.store.ImageBytes(c.lifetime, p.ImageID)
 		if err != nil {

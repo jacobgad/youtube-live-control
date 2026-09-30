@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.0
+
+**Options renamed — re-enter them after updating.** Five polling knobs become four, all in seconds: **Idle refresh** (`refresh_idle_seconds`, drives the broadcast list and the idle status check), **Live refresh** (`refresh_live_seconds`), **Fast refresh** (`refresh_fast_seconds`) and **Fast refresh duration** (`fast_refresh_duration_seconds`). `external_url` is now **OAuth redirect base URL** (`oauth_redirect_base_url`). Every option has a name and description on the Configuration tab.
+- Presets and broadcasts gain a **Category** (YouTube video category, from the channel's country; one `videos.update` per schedule). Comment settings are not exposed by the YouTube API and remain a Studio setting.
+- "on the panel" wording replaced with "Selected in Home Assistant".
+
 ## 1.5.1
 
 - Web UI: one stylesheet for the whole site; consistent cards (status left, action right), one-word buttons, image gallery and picker tiles; connection page cut to the essentials; preset delete moved onto the preset's page; image names dropped (schema 3).

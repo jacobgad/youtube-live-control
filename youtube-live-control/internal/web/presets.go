@@ -32,10 +32,11 @@ func (s *Server) handlePresets(w http.ResponseWriter, r *http.Request) {
 }
 
 type presetFormData struct {
-	Preset  preset.Preset
-	Streams []youtube.Stream
-	Images  []store.Image
-	IsNew   bool
+	Preset     preset.Preset
+	Streams    []youtube.Stream
+	Categories []youtube.Category
+	Images     []store.Image
+	IsNew      bool
 }
 
 func (s *Server) handlePresetForm(w http.ResponseWriter, r *http.Request) {
@@ -51,8 +52,17 @@ func (s *Server) handlePresetForm(w http.ResponseWriter, r *http.Request) {
 		data.Preset, data.IsNew = p, false
 	}
 	data.Streams = s.streams(ctx)
+	data.Categories = s.categories(ctx)
 	data.Images = s.images(ctx)
 	s.render(w, r, "preset_form", "Preset", data, "")
+}
+
+func (s *Server) categories(ctx context.Context) []youtube.Category {
+	categories, err := s.ctrl.Categories(ctx)
+	if err != nil {
+		s.log.Warn("categories_list_failed", "error", err.Error())
+	}
+	return categories
 }
 
 func (s *Server) images(ctx context.Context) []store.Image {
@@ -86,6 +96,7 @@ func (s *Server) handleSavePreset(w http.ResponseWriter, r *http.Request) {
 		Weekday:       time.Weekday(weekday),
 		TimeOfDay:     r.FormValue("time_of_day"),
 		ImageID:       r.FormValue("image_id"),
+		CategoryID:    r.FormValue("category_id"),
 	}
 	imageID, err := s.pickedImage(ctx, r, p.ImageID)
 	if err == nil {
@@ -93,7 +104,7 @@ func (s *Server) handleSavePreset(w http.ResponseWriter, r *http.Request) {
 		p, err = s.store.SavePreset(ctx, p)
 	}
 	if err != nil {
-		s.render(w, r, "preset_form", "Preset", presetFormData{Preset: p, Streams: s.streams(ctx), Images: s.images(ctx), IsNew: p.ID == ""}, err.Error())
+		s.render(w, r, "preset_form", "Preset", presetFormData{Preset: p, Streams: s.streams(ctx), Categories: s.categories(ctx), Images: s.images(ctx), IsNew: p.ID == ""}, err.Error())
 		return
 	}
 	s.log.Info("preset_saved", "id", p.ID, "name", p.Name)

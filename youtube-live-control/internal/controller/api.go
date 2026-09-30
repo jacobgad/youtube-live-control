@@ -12,7 +12,7 @@ import (
 	"github.com/jacobgad/youtube-live-control/internal/youtube"
 )
 
-// The web UI drives the same single-writer queue as the MQTT panel, so producer
+// The web UI drives the same single-writer queue as the MQTT entities, so producer
 // edits and volunteer commands never interleave and every write is read back.
 
 // Listing is the cached view of the channel's broadcasts.
@@ -67,13 +67,27 @@ func (c *Controller) Streams(ctx context.Context) ([]youtube.Stream, error) {
 	return c.yt.ListStreams(ctx)
 }
 
-// Edit is a change to a broadcast; an empty StreamID leaves the binding alone.
+// Categories lists the video categories assignable in the channel's country. Costs 1 quota unit.
+func (c *Controller) Categories(ctx context.Context) ([]youtube.Category, error) {
+	c.mu.Lock()
+	country := c.session.country
+	c.mu.Unlock()
+	return c.yt.ListCategories(ctx, country)
+}
+
+// VideoCategory reads a broadcast's current category; ok is false when the video is gone. Costs 1 quota unit.
+func (c *Controller) VideoCategory(ctx context.Context, id string) (string, bool, error) {
+	return c.yt.VideoCategory(ctx, id)
+}
+
+// Edit is a change to a broadcast; an empty StreamID or CategoryID leaves that alone.
 type Edit struct {
 	Title       string
 	Description string
 	Start       time.Time
 	Privacy     string
 	StreamID    string
+	CategoryID  string
 }
 
 // Validate reports the first problem as a user-facing message.
@@ -109,6 +123,11 @@ func (c *Controller) Update(ctx context.Context, id string, edit Edit) (youtube.
 		})
 		if err != nil {
 			return err
+		}
+		if edit.CategoryID != "" {
+			if err := c.setCategory(ctx, id, edit.CategoryID); err != nil {
+				return err
+			}
 		}
 		if edit.StreamID != "" && edit.StreamID != b.BoundStreamID {
 			if err := c.bind(ctx, id, edit.StreamID); err != nil {
@@ -169,6 +188,11 @@ func (c *Controller) createBroadcast(ctx context.Context, req NewBroadcast) (you
 	if err := c.bind(ctx, created.ID, req.StreamID); err != nil {
 		return youtube.Broadcast{}, err
 	}
+	if req.CategoryID != "" {
+		if err := c.setCategory(ctx, created.ID, req.CategoryID); err != nil {
+			return youtube.Broadcast{}, fmt.Errorf("broadcast created but setting the category failed: %w", err)
+		}
+	}
 	if len(req.Thumbnail) > 0 {
 		if err := c.yt.SetThumbnail(ctx, created.ID, req.ThumbnailType, req.Thumbnail); err != nil {
 			c.log.Error("operation_failed", "operation", "thumbnail_upload", "id", created.ID, "error", err)
@@ -215,6 +239,15 @@ func (c *Controller) SetThumbnail(ctx context.Context, id, contentType string, i
 		}
 		return nil
 	})
+}
+
+func (c *Controller) setCategory(ctx context.Context, id, categoryID string) error {
+	if err := c.yt.SetVideoCategory(ctx, id, categoryID); err != nil {
+		c.log.Error("operation_failed", "operation", "set_category", "id", id, "categoryId", categoryID, "error", err)
+		return fmt.Errorf("set category: %w", err)
+	}
+	c.log.Info("category_set", "id", id, "categoryId", categoryID)
+	return nil
 }
 
 func (c *Controller) bind(ctx context.Context, id, streamID string) error {

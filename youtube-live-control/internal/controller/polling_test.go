@@ -9,10 +9,10 @@ import (
 )
 
 var testOptions = config.Options{
-	FastPollInterval: 3 * time.Second,
-	FastModeDuration: 5 * time.Minute,
-	LivePollInterval: time.Minute,
-	IdlePollInterval: 10 * time.Minute,
+	FastRefresh:         3 * time.Second,
+	FastRefreshDuration: 5 * time.Minute,
+	LiveRefresh:         time.Minute,
+	IdleRefresh:         10 * time.Minute,
 }
 
 func TestFastWindow(t *testing.T) {
@@ -21,7 +21,7 @@ func TestFastWindow(t *testing.T) {
 	if s.fastActive(now) || s.fastRemainingMinutes(now) != 0 {
 		t.Fatal("fast window should start off")
 	}
-	s.armFast(now, testOptions.FastModeDuration)
+	s.armFast(now, testOptions.FastRefreshDuration)
 	if !s.fastActive(now) {
 		t.Fatal("armFast did not arm")
 	}
@@ -31,7 +31,7 @@ func TestFastWindow(t *testing.T) {
 	if got := s.fastRemainingMinutes(now.Add(4*time.Minute + 30*time.Second)); got != 1 {
 		t.Fatalf("remaining near expiry = %d", got)
 	}
-	expiry := now.Add(testOptions.FastModeDuration)
+	expiry := now.Add(testOptions.FastRefreshDuration)
 	if s.fastActive(expiry) || s.fastRemainingMinutes(expiry) != 0 {
 		t.Fatal("window should be over exactly at expiry")
 	}
@@ -40,18 +40,18 @@ func TestFastWindow(t *testing.T) {
 func TestStatusDelayTiers(t *testing.T) {
 	c := &Controller{now: time.Now, opts: testOptions}
 
-	if got := c.statusDelay(); got != testOptions.IdlePollInterval {
+	if got := c.statusDelay(); got != testOptions.IdleRefresh {
 		t.Fatalf("idle tier = %v", got)
 	}
 
 	c.session.setBroadcasts([]youtube.Broadcast{{ID: "b1", Title: "Service", LifeCycleStatus: youtube.LifeLive}}, time.Now())
 	c.session.selectedID = "b1"
-	if got := c.statusDelay(); got != testOptions.LivePollInterval {
+	if got := c.statusDelay(); got != testOptions.LiveRefresh {
 		t.Fatalf("live tier = %v", got)
 	}
 
-	c.session.armFast(time.Now(), testOptions.FastModeDuration)
-	if got := c.statusDelay(); got != testOptions.FastPollInterval {
+	c.session.armFast(time.Now(), testOptions.FastRefreshDuration)
+	if got := c.statusDelay(); got != testOptions.FastRefresh {
 		t.Fatalf("fast tier = %v", got)
 	}
 }

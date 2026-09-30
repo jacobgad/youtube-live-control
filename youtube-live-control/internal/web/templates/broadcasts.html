@@ -25,7 +25,7 @@
 </div>
 <div class="side">
 {{if or (eq .LifeCycleStatus "live") (eq .LifeCycleStatus "liveStarting")}}<span class="badge live">live</span>{{else}}<span class="badge">{{.LifeCycleStatus}}</span>{{end}}
-{{if eq .ID $.Data.Listing.SelectedID}}<span class="badge ok">on the panel</span>{{end}}
+{{if eq .ID $.Data.Listing.SelectedID}}<span class="badge ok">Selected in Home Assistant</span>{{end}}
 </div>
 </div>
 {{end}}

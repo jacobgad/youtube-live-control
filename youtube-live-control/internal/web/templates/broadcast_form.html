@@ -19,6 +19,13 @@
 <input type="datetime-local" id="start" name="start" value="{{inputTime .Start}}" required>
 </div>
 <div class="field">
+<label for="category_id">Category</label>
+<select id="category_id" name="category_id">
+<option value="" {{if not .CategoryID}}selected{{end}}>{{if .ID}}Keep current{{else}}YouTube default{{end}}</option>
+{{range .Categories}}<option value="{{.ID}}" {{if eq .ID $.Data.CategoryID}}selected{{end}}>{{.Title}}</option>{{end}}
+</select>
+</div>
+<div class="field">
 <label for="privacy">Privacy</label>
 <select id="privacy" name="privacy">
 <option value="public" {{if eq .Privacy "public"}}selected{{end}}>Public</option>

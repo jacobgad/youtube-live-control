@@ -206,7 +206,7 @@ func (c *Controller) clearPending(ctx context.Context) {
 	c.mu.Lock()
 	c.session.pending = pendingNone
 	// Re-armed so the post-transition stage lands without another tap.
-	c.session.armFast(c.now(), c.opts.FastModeDuration)
+	c.session.armFast(c.now(), c.opts.FastRefreshDuration)
 	c.mu.Unlock()
 	c.pub.update(ctx, c.snapshot)
 	c.kickStatusPoll()

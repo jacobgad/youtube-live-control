@@ -398,6 +398,13 @@ func (c *Client) ListStreams(ctx context.Context) ([]Stream, error) {
 
 // Channel identifies the YouTube channel the stored token acts on.
 type Channel struct {
+	ID      string
+	Title   string
+	Country string
+}
+
+// Category is a YouTube video category available in the channel's country.
+type Category struct {
 	ID    string
 	Title string
 }
@@ -408,7 +415,8 @@ func (c *Client) MyChannel(ctx context.Context) (Channel, error) {
 		Items []struct {
 			ID      string `json:"id"`
 			Snippet struct {
-				Title string `json:"title"`
+				Title   string `json:"title"`
+				Country string `json:"country"`
 			} `json:"snippet"`
 		} `json:"items"`
 	}
@@ -419,7 +427,93 @@ func (c *Client) MyChannel(ctx context.Context) (Channel, error) {
 	if len(out.Items) == 0 {
 		return Channel{}, errors.New("token is not associated with any YouTube channel")
 	}
-	return Channel{ID: out.Items[0].ID, Title: out.Items[0].Snippet.Title}, nil
+	return Channel{ID: out.Items[0].ID, Title: out.Items[0].Snippet.Title, Country: out.Items[0].Snippet.Country}, nil
+}
+
+// Category ids are global; only the assignable set varies by region, so a channel
+// without a country gets the US list rather than none.
+const fallbackRegion = "US"
+
+// ListCategories lists the assignable video categories for a country. Costs 1 quota unit.
+func (c *Client) ListCategories(ctx context.Context, regionCode string) ([]Category, error) {
+	if regionCode == "" {
+		regionCode = fallbackRegion
+	}
+	var out struct {
+		Items []struct {
+			ID      string `json:"id"`
+			Snippet struct {
+				Title      string `json:"title"`
+				Assignable bool   `json:"assignable"`
+			} `json:"snippet"`
+		} `json:"items"`
+	}
+	err := c.do(ctx, http.MethodGet, apiBase+"/videoCategories", url.Values{"part": {"snippet"}, "regionCode": {regionCode}}, nil, &out)
+	if err != nil {
+		return nil, err
+	}
+	categories := make([]Category, 0, len(out.Items))
+	for _, item := range out.Items {
+		if item.Snippet.Assignable {
+			categories = append(categories, Category{ID: item.ID, Title: item.Snippet.Title})
+		}
+	}
+	return categories, nil
+}
+
+func (c *Client) videoSnippet(ctx context.Context, videoID string) (map[string]any, bool, error) {
+	var out struct {
+		Items []struct {
+			Snippet map[string]any `json:"snippet"`
+		} `json:"items"`
+	}
+	err := c.do(ctx, http.MethodGet, apiBase+"/videos", url.Values{"part": {"snippet"}, "id": {videoID}}, nil, &out)
+	if err != nil {
+		return nil, false, err
+	}
+	if len(out.Items) == 0 {
+		return nil, false, nil
+	}
+	return out.Items[0].Snippet, true, nil
+}
+
+// VideoCategory reads the category of the broadcast's video; ok is false when the
+// video does not exist. Costs 1 quota unit.
+func (c *Client) VideoCategory(ctx context.Context, videoID string) (string, bool, error) {
+	snippet, ok, err := c.videoSnippet(ctx, videoID)
+	if err != nil || !ok {
+		return "", ok, err
+	}
+	return stringField(snippet, "categoryId"), true, nil
+}
+
+// Read-only video snippet fields, stripped so the echoed body is valid input.
+var videoSnippetReadOnly = []string{"publishedAt", "channelId", "channelTitle", "thumbnails", "liveBroadcastContent", "localized"}
+
+func videoUpdateBody(videoID string, snippet map[string]any, categoryID string) map[string]any {
+	snippet = cloneOrEmpty(snippet)
+	snippet["categoryId"] = categoryID
+	for _, key := range videoSnippetReadOnly {
+		delete(snippet, key)
+	}
+	return map[string]any{"id": videoID, "snippet": snippet}
+}
+
+// SetVideoCategory writes the video's category over its snippet as fetched (the PUT
+// replaces the whole part); an unchanged category is a no-op that costs only the read.
+// Costs 1 quota unit, plus 50 when a write is needed.
+func (c *Client) SetVideoCategory(ctx context.Context, videoID, categoryID string) error {
+	snippet, ok, err := c.videoSnippet(ctx, videoID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("video not found")
+	}
+	if stringField(snippet, "categoryId") == categoryID {
+		return nil
+	}
+	return c.do(ctx, http.MethodPut, apiBase+"/videos", url.Values{"part": {"snippet"}}, videoUpdateBody(videoID, snippet, categoryID), nil)
 }
 
 // SetThumbnail uploads a thumbnail for the broadcast. Costs 50 quota units.

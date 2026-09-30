@@ -44,6 +44,8 @@ type broadcastForm struct {
 	Lifecycle    string
 	Images       []store.Image
 	ImageID      string
+	Categories   []youtube.Category
+	CategoryID   string
 }
 
 func (s *Server) handleNewBroadcastForm(w http.ResponseWriter, r *http.Request) {
@@ -63,9 +65,11 @@ func (s *Server) handleNewBroadcastForm(w http.ResponseWriter, r *http.Request) 
 		Privacy:     p.Privacy,
 		StreamID:    p.StreamID,
 		ImageID:     p.ImageID,
+		CategoryID:  p.CategoryID,
 	}
 	form.Streams = s.streams(ctx)
 	form.Images = s.images(ctx)
+	form.Categories = s.categories(ctx)
 	s.render(w, r, "broadcast_form", "New broadcast", form, "")
 }
 
@@ -77,13 +81,13 @@ func (s *Server) handleNewBroadcast(w http.ResponseWriter, r *http.Request) {
 		image, contentType, err = s.store.ImageBytes(ctx, form.ImageID)
 	}
 	if err != nil {
-		form.Streams, form.Images = s.streams(ctx), s.images(ctx)
+		form.Streams, form.Images, form.Categories = s.streams(ctx), s.images(ctx), s.categories(ctx)
 		s.render(w, r, "broadcast_form", "New broadcast", form, err.Error())
 		return
 	}
 	created, err := s.ctrl.Create(ctx, controller.NewBroadcast{Edit: form.edit(), Thumbnail: image, ThumbnailType: contentType})
 	if err != nil {
-		form.Streams, form.Images = s.streams(ctx), s.images(ctx)
+		form.Streams, form.Images, form.Categories = s.streams(ctx), s.images(ctx), s.categories(ctx)
 		s.render(w, r, "broadcast_form", "New broadcast", form, err.Error())
 		return
 	}
@@ -110,6 +114,10 @@ func (s *Server) handleEditBroadcastForm(w http.ResponseWriter, r *http.Request)
 	}
 	form.Streams = s.streams(ctx)
 	form.Images = s.images(ctx)
+	form.Categories = s.categories(ctx)
+	if category, ok, err := s.ctrl.VideoCategory(ctx, b.ID); err == nil && ok {
+		form.CategoryID = category
+	}
 	s.render(w, r, "broadcast_form", "Edit broadcast", form, "")
 }
 
@@ -129,7 +137,7 @@ func (s *Server) handleEditBroadcast(w http.ResponseWriter, r *http.Request) {
 		err = s.ctrl.SetThumbnail(ctx, id, contentType, image)
 	}
 	if err != nil {
-		form.Streams, form.Images = s.streams(ctx), s.images(ctx)
+		form.Streams, form.Images, form.Categories = s.streams(ctx), s.images(ctx), s.categories(ctx)
 		s.render(w, r, "broadcast_form", "Edit broadcast", form, err.Error())
 		return
 	}
@@ -152,7 +160,7 @@ func (s *Server) handleDeleteBroadcast(w http.ResponseWriter, r *http.Request) {
 }
 
 func (f broadcastForm) edit() controller.Edit {
-	return controller.Edit{Title: f.Title, Description: f.Description, Start: f.Start, Privacy: f.Privacy, StreamID: f.StreamID}
+	return controller.Edit{Title: f.Title, Description: f.Description, Start: f.Start, Privacy: f.Privacy, StreamID: f.StreamID, CategoryID: f.CategoryID}
 }
 
 func (s *Server) parseBroadcastForm(r *http.Request) (broadcastForm, []byte, string, error) {
@@ -167,6 +175,7 @@ func (s *Server) parseBroadcastForm(r *http.Request) (broadcastForm, []byte, str
 		Privacy:     r.FormValue("privacy"),
 		StreamID:    r.FormValue("stream_id"),
 		ImageID:     r.FormValue("image_id"),
+		CategoryID:  r.FormValue("category_id"),
 	}
 	if raw := r.FormValue("start"); raw != "" {
 		start, err := time.ParseInLocation(inputTimeLayout, raw, time.Local)

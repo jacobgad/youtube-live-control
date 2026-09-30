@@ -17,21 +17,20 @@ import (
 
 // Options are the validated add-on options.
 type Options struct {
-	GoogleClientID     string
-	GoogleClientSecret string
-	ExternalURL        string
-	ListPollInterval   time.Duration
-	FastPollInterval   time.Duration
-	FastModeDuration   time.Duration
-	LivePollInterval   time.Duration
-	IdlePollInterval   time.Duration
-	LogLevel           slog.Level
+	GoogleClientID       string
+	GoogleClientSecret   string
+	OAuthRedirectBaseURL string
+	IdleRefresh          time.Duration
+	LiveRefresh          time.Duration
+	FastRefresh          time.Duration
+	FastRefreshDuration  time.Duration
+	LogLevel             slog.Level
 }
 
 // String omits the client secret so no fmt path can leak it.
 func (o Options) String() string {
-	return fmt.Sprintf("Options{clientID=%s externalURL=%s listPoll=%s fastPoll=%s fastMode=%s livePoll=%s idlePoll=%s logLevel=%s}",
-		o.GoogleClientID, o.ExternalURL, o.ListPollInterval, o.FastPollInterval, o.FastModeDuration, o.LivePollInterval, o.IdlePollInterval, o.LogLevel)
+	return fmt.Sprintf("Options{clientID=%s oauthRedirectBaseURL=%s idleRefresh=%s liveRefresh=%s fastRefresh=%s fastRefreshDuration=%s logLevel=%s}",
+		o.GoogleClientID, o.OAuthRedirectBaseURL, o.IdleRefresh, o.LiveRefresh, o.FastRefresh, o.FastRefreshDuration, o.LogLevel)
 }
 
 // GoString mirrors String for %#v, which bypasses Stringer.
@@ -41,12 +40,11 @@ func (o Options) GoString() string { return o.String() }
 func (o Options) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.String("clientID", o.GoogleClientID),
-		slog.String("externalURL", o.ExternalURL),
-		slog.Duration("listPoll", o.ListPollInterval),
-		slog.Duration("fastPoll", o.FastPollInterval),
-		slog.Duration("fastMode", o.FastModeDuration),
-		slog.Duration("livePoll", o.LivePollInterval),
-		slog.Duration("idlePoll", o.IdlePollInterval),
+		slog.String("oauthRedirectBaseURL", o.OAuthRedirectBaseURL),
+		slog.Duration("idleRefresh", o.IdleRefresh),
+		slog.Duration("liveRefresh", o.LiveRefresh),
+		slog.Duration("fastRefresh", o.FastRefresh),
+		slog.Duration("fastRefreshDuration", o.FastRefreshDuration),
 		slog.String("logLevel", o.LogLevel.String()),
 	)
 }
@@ -87,15 +85,14 @@ type Config struct {
 }
 
 type rawOptions struct {
-	GoogleClientID     *string `json:"google_client_id"`
-	GoogleClientSecret *string `json:"google_client_secret"`
-	ExternalURL        *string `json:"external_url"`
-	ListPollMinutes    *int    `json:"list_poll_minutes"`
-	FastPollSeconds    *int    `json:"fast_poll_seconds"`
-	FastModeMinutes    *int    `json:"fast_mode_minutes"`
-	LivePollSeconds    *int    `json:"live_poll_seconds"`
-	IdlePollMinutes    *int    `json:"idle_poll_minutes"`
-	LogLevel           *string `json:"log_level"`
+	GoogleClientID       *string `json:"google_client_id"`
+	GoogleClientSecret   *string `json:"google_client_secret"`
+	OAuthRedirectBaseURL *string `json:"oauth_redirect_base_url"`
+	IdleRefreshSeconds   *int    `json:"refresh_idle_seconds"`
+	LiveRefreshSeconds   *int    `json:"refresh_live_seconds"`
+	FastRefreshSeconds   *int    `json:"refresh_fast_seconds"`
+	FastDurationSeconds  *int    `json:"fast_refresh_duration_seconds"`
+	LogLevel             *string `json:"log_level"`
 }
 
 type intervalOption struct {
@@ -115,12 +112,11 @@ func ParseOptions(data []byte) (Options, error) {
 		return Options{}, fmt.Errorf("options are not valid JSON: %w", err)
 	}
 	opts := Options{
-		ListPollInterval: 5 * time.Minute,
-		FastPollInterval: 3 * time.Second,
-		FastModeDuration: 5 * time.Minute,
-		LivePollInterval: time.Minute,
-		IdlePollInterval: 10 * time.Minute,
-		LogLevel:         slog.LevelInfo,
+		IdleRefresh:         10 * time.Minute,
+		LiveRefresh:         time.Minute,
+		FastRefresh:         3 * time.Second,
+		FastRefreshDuration: 5 * time.Minute,
+		LogLevel:            slog.LevelInfo,
 	}
 	if raw.GoogleClientID != nil {
 		opts.GoogleClientID = strings.TrimSpace(*raw.GoogleClientID)
@@ -128,15 +124,14 @@ func ParseOptions(data []byte) (Options, error) {
 	if raw.GoogleClientSecret != nil {
 		opts.GoogleClientSecret = strings.TrimSpace(*raw.GoogleClientSecret)
 	}
-	if raw.ExternalURL != nil {
-		opts.ExternalURL = strings.TrimRight(strings.TrimSpace(*raw.ExternalURL), "/")
+	if raw.OAuthRedirectBaseURL != nil {
+		opts.OAuthRedirectBaseURL = strings.TrimRight(strings.TrimSpace(*raw.OAuthRedirectBaseURL), "/")
 	}
 	intervals := []intervalOption{
-		{"list_poll_minutes", raw.ListPollMinutes, 1, 60, time.Minute, &opts.ListPollInterval},
-		{"fast_poll_seconds", raw.FastPollSeconds, 1, 30, time.Second, &opts.FastPollInterval},
-		{"fast_mode_minutes", raw.FastModeMinutes, 1, 60, time.Minute, &opts.FastModeDuration},
-		{"live_poll_seconds", raw.LivePollSeconds, 15, 600, time.Second, &opts.LivePollInterval},
-		{"idle_poll_minutes", raw.IdlePollMinutes, 1, 60, time.Minute, &opts.IdlePollInterval},
+		{"refresh_idle_seconds", raw.IdleRefreshSeconds, 60, 3600, time.Second, &opts.IdleRefresh},
+		{"refresh_live_seconds", raw.LiveRefreshSeconds, 15, 600, time.Second, &opts.LiveRefresh},
+		{"refresh_fast_seconds", raw.FastRefreshSeconds, 1, 30, time.Second, &opts.FastRefresh},
+		{"fast_refresh_duration_seconds", raw.FastDurationSeconds, 60, 3600, time.Second, &opts.FastRefreshDuration},
 	}
 	for _, opt := range intervals {
 		if opt.raw == nil {

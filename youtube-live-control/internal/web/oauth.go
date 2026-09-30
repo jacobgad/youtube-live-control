@@ -29,7 +29,7 @@ func (s *Server) renderConnection(w http.ResponseWriter, r *http.Request, errMsg
 	data := connectionData{Configured: s.auth.Configured()}
 	if data.Configured {
 		data.RedirectURI = s.redirectURI()
-		data.External = s.opts.ExternalURL != ""
+		data.External = s.opts.OAuthRedirectBaseURL != ""
 		state, err := s.newState(data.RedirectURI)
 		if err != nil {
 			http.Error(w, "failed to create OAuth state", http.StatusInternalServerError)
@@ -42,10 +42,10 @@ func (s *Server) renderConnection(w http.ResponseWriter, r *http.Request, errMsg
 
 // Google's OAuth policy rejects plain-http redirects except to loopback, so the
 // default is localhost (the browser then shows the code in a failed tab, which the
-// paste form accepts); external_url is for an https reverse proxy in front of :8098.
+// paste form accepts); oauth_redirect_base_url is for an https reverse proxy in front of :8098.
 func (s *Server) redirectURI() string {
-	if s.opts.ExternalURL != "" {
-		return s.opts.ExternalURL + "/oauth/callback"
+	if s.opts.OAuthRedirectBaseURL != "" {
+		return s.opts.OAuthRedirectBaseURL + "/oauth/callback"
 	}
 	return fmt.Sprintf("http://localhost:%d/oauth/callback", callbackPort)
 }

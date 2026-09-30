@@ -1,7 +1,7 @@
 name: YouTube Live Control
-version: "1.5.1"
+version: "1.6.0"
 slug: youtube_live_control
-description: Schedule YouTube live streams from presets, then go live and end them from one Home Assistant panel
+description: Schedule YouTube live streams from presets, then go live and end them from Home Assistant
 url: https://github.com/jacobgad/youtube-live-control
 arch:
   - aarch64
@@ -15,24 +15,22 @@ panel_title: YouTube Live
 ports:
   8098/tcp: 8098
 ports_description:
-  8098/tcp: OAuth redirect endpoint; only reached directly when external_url points an https proxy at it
+  8098/tcp: OAuth redirect endpoint; only reached directly when oauth_redirect_base_url points an https proxy at it
 options:
   google_client_id: ""
   google_client_secret: ""
-  external_url: ""
-  list_poll_minutes: 5
-  fast_poll_seconds: 3
-  fast_mode_minutes: 5
-  live_poll_seconds: 60
-  idle_poll_minutes: 10
+  oauth_redirect_base_url: ""
+  refresh_idle_seconds: 600
+  refresh_live_seconds: 60
+  refresh_fast_seconds: 3
+  fast_refresh_duration_seconds: 300
   log_level: info
 schema:
   google_client_id: str
   google_client_secret: password
-  external_url: str?
-  list_poll_minutes: int(1,60)
-  fast_poll_seconds: int(1,30)
-  fast_mode_minutes: int(1,60)
-  live_poll_seconds: int(15,600)
-  idle_poll_minutes: int(1,60)
+  oauth_redirect_base_url: str?
+  refresh_idle_seconds: int(60,3600)
+  refresh_live_seconds: int(15,600)
+  refresh_fast_seconds: int(1,30)
+  fast_refresh_duration_seconds: int(60,3600)
   log_level: list(debug|info|warn|error)

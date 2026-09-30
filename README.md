@@ -18,7 +18,7 @@ Home Assistant ──MQTT──▶ Mosquitto ◀──MQTT── youtube-live-co
 - **Two MQTT devices.** *YouTube Live Scheduling* creates broadcasts from presets (Preset, Date, Time, Schedule). *YouTube Live* is the selected broadcast: Broadcast select, Title and Privacy applied immediately, a Stage enum sensor, timestamp, image and binary sensors, Go Live and End Stream. Every entity is a core Home Assistant platform.
 - **Nothing is optimistic.** Commands re-read the broadcast and stream, write, then read back before publishing. State topics are retained, command topics are not, replays are dropped. `enableAutoStart`/`enableAutoStop` are always false; Go Live needs the stream `active`, End Stream needs it stopped.
 - **Nothing selects itself.** The Broadcast select is sorted live-first then soonest; only a person changes it.
-- **Polling follows people.** Idle, live and fast tiers; any panel interaction arms the fast window, which expires on its own.
+- **Polling follows people.** Idle, live and fast tiers; any interaction with the entities arms the fast window, which expires on its own.
 - **Storage is one database and one directory.** Presets, image records, settings and the refresh token in SQLite with a versioned schema; thumbnails as files.
 
 ## MQTT contract
@@ -49,8 +49,8 @@ Devices `ylc:controller` (entities `youtube_live_control_*`) and `ylc:scheduling
 | --- | --- | --- |
 | `liveBroadcasts.list` upcoming + active | list poll | 2 |
 | `liveBroadcasts.list` by id, `liveStreams.list` by id | status poll; before and after every command | 1 + 1 |
-| `liveStreams.list` mine, `channels.list` mine | web UI forms, connection | 1 |
-| `liveBroadcasts.insert` / `update` / `delete` / `bind` / `transition`, `thumbnails.set` | Schedule, edits, buttons | 50 |
+| `liveStreams.list` mine, `channels.list` mine, `videoCategories.list`, `videos.list` | web UI forms, connection | 1 |
+| `liveBroadcasts.insert` / `update` / `delete` / `bind` / `transition`, `thumbnails.set`, `videos.update` | Schedule, edits, buttons | 50 |
 
 ## Development
 

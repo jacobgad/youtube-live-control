@@ -36,6 +36,7 @@ func TestPresetRoundTrip(t *testing.T) {
 	}
 	p := sample()
 	p.ImageID = img.ID
+	p.CategoryID = "29"
 	saved, err := s.SavePreset(ctx, p)
 	if err != nil || saved.ID == "" {
 		t.Fatalf("SavePreset: %v (%+v)", err, saved)
@@ -45,7 +46,7 @@ func TestPresetRoundTrip(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := s.GetPreset(ctx, saved.ID)
-	if err != nil || got.Name != "Sunday morning" || got.ImageID != img.ID || got.Weekday != time.Sunday {
+	if err != nil || got.Name != "Sunday morning" || got.ImageID != img.ID || got.Weekday != time.Sunday || got.CategoryID != "29" {
 		t.Fatalf("GetPreset = %+v, %v", got, err)
 	}
 	list, err := s.ListPresets(ctx)

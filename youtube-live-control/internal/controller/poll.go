@@ -15,7 +15,7 @@ func (c *Controller) listLoop() {
 		select {
 		case <-c.lifetime.Done():
 			return
-		case <-time.After(c.opts.ListPollInterval):
+		case <-time.After(c.opts.IdleRefresh):
 			c.refreshList(c.lifetime)
 		}
 	}
@@ -40,12 +40,12 @@ func (c *Controller) statusDelay() time.Duration {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.session.fastActive(c.now()) {
-		return c.opts.FastPollInterval
+		return c.opts.FastRefresh
 	}
 	if b := c.session.selected(); b != nil && isLive(*b) {
-		return c.opts.LivePollInterval
+		return c.opts.LiveRefresh
 	}
-	return c.opts.IdlePollInterval
+	return c.opts.IdleRefresh
 }
 
 // The service, not Home Assistant, owns the switch's OFF transition; publishing on
@@ -92,7 +92,7 @@ func (c *Controller) refreshList(ctx context.Context) {
 
 	c.mu.Lock()
 	// A selected broadcast that is mid-transition or live is pinned even if YouTube's
-	// list filters momentarily omit it, so the panel cannot lose it mid-service.
+	// list filters momentarily omit it, so Home Assistant cannot lose it mid-service.
 	if pinned := c.session.selected(); pinned != nil && !seen[pinned.ID] && pinned.LifeCycleStatus != youtube.LifeComplete {
 		merged = append(merged, *pinned)
 	}

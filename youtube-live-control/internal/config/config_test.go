@@ -16,7 +16,7 @@ func TestParseOptionsDefaults(t *testing.T) {
 	if opts.GoogleClientID != "id" || opts.GoogleClientSecret != "secret" {
 		t.Fatalf("client not parsed: %+v", opts)
 	}
-	if opts.ListPollInterval != 5*time.Minute || opts.FastPollInterval != 3*time.Second || opts.FastModeDuration != 5*time.Minute || opts.LivePollInterval != time.Minute || opts.IdlePollInterval != 10*time.Minute {
+	if opts.IdleRefresh != 10*time.Minute || opts.LiveRefresh != time.Minute || opts.FastRefresh != 3*time.Second || opts.FastRefreshDuration != 5*time.Minute {
 		t.Fatalf("interval defaults = %+v", opts)
 	}
 	if opts.LogLevel != slog.LevelInfo {
@@ -35,29 +35,30 @@ func TestParseOptionsEmptyClientAllowed(t *testing.T) {
 }
 
 func TestParseOptionsIntervals(t *testing.T) {
-	opts, err := ParseOptions([]byte(`{"list_poll_minutes":2,"fast_poll_seconds":5,"fast_mode_minutes":3,"live_poll_seconds":30,"idle_poll_minutes":15}`))
+	opts, err := ParseOptions([]byte(`{"refresh_idle_seconds":900,"refresh_live_seconds":30,"refresh_fast_seconds":5,"fast_refresh_duration_seconds":180}`))
 	if err != nil {
 		t.Fatalf("ParseOptions: %v", err)
 	}
-	if opts.ListPollInterval != 2*time.Minute || opts.FastPollInterval != 5*time.Second || opts.FastModeDuration != 3*time.Minute || opts.LivePollInterval != 30*time.Second || opts.IdlePollInterval != 15*time.Minute {
+	if opts.IdleRefresh != 15*time.Minute || opts.LiveRefresh != 30*time.Second || opts.FastRefresh != 5*time.Second || opts.FastRefreshDuration != 3*time.Minute {
 		t.Fatalf("intervals = %+v", opts)
 	}
 }
 
-func TestParseOptionsExternalURLTrimmed(t *testing.T) {
-	opts, err := ParseOptions([]byte(`{"external_url":" http://ha.local:8098/ "}`))
+func TestParseOptionsRedirectBaseURLTrimmed(t *testing.T) {
+	opts, err := ParseOptions([]byte(`{"oauth_redirect_base_url":" https://ylc.example.org/ "}`))
 	if err != nil {
 		t.Fatalf("ParseOptions: %v", err)
 	}
-	if opts.ExternalURL != "http://ha.local:8098" {
-		t.Fatalf("external url = %q", opts.ExternalURL)
+	if opts.OAuthRedirectBaseURL != "https://ylc.example.org" {
+		t.Fatalf("redirect base url = %q", opts.OAuthRedirectBaseURL)
 	}
 }
 
 func TestParseOptionsRejectsBadValues(t *testing.T) {
 	for name, payload := range map[string]string{
-		"fast_low":  `{"fast_poll_seconds":0}`,
-		"live_high": `{"live_poll_seconds":601}`,
+		"idle_low":  `{"refresh_idle_seconds":30}`,
+		"live_high": `{"refresh_live_seconds":601}`,
+		"fast_high": `{"refresh_fast_seconds":31}`,
 		"log_level": `{"log_level":"loud"}`,
 		"not_json":  `{`,
 	} {

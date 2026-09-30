@@ -107,6 +107,26 @@ func TestValidPrivacy(t *testing.T) {
 	}
 }
 
+func TestVideoUpdateBodyPreservesSnippetAndStripsReadOnly(t *testing.T) {
+	snippet := map[string]any{"title": "T", "description": "D", "tags": []any{"a"}, "defaultLanguage": "en", "categoryId": "22", "publishedAt": "x", "thumbnails": map[string]any{}, "channelId": "UC"}
+	body := videoUpdateBody("v1", snippet, "29")
+	got := body["snippet"].(map[string]any)
+	if got["categoryId"] != "29" || got["defaultLanguage"] != "en" || got["title"] != "T" {
+		t.Fatalf("snippet = %v", got)
+	}
+	for _, key := range videoSnippetReadOnly {
+		if _, present := got[key]; present {
+			t.Fatalf("read-only %s sent", key)
+		}
+	}
+	if snippet["categoryId"] != "22" {
+		t.Fatal("input snippet must not be mutated")
+	}
+	if body["id"] != "v1" {
+		t.Fatalf("id = %v", body["id"])
+	}
+}
+
 func TestUpdateBodyWithoutFetchedPartsStillValid(t *testing.T) {
 	body := updateBody(Broadcast{ID: "x", Title: "T", ScheduledStart: time.Now(), PrivacyStatus: "public"})
 	content := body["contentDetails"].(map[string]any)

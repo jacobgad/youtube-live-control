@@ -29,7 +29,7 @@ The web UI header shows the connected channel; the **Channel** sensor shows the 
 
 A channel appears on Google's chooser only if the account is an owner or manager of its **Brand Account** (myaccount.google.com/brandaccounts). Access granted through *YouTube Studio → Settings → Permissions* is Studio-only; the owner must add you as a Brand Account manager or connect themselves.
 
-If you have a public **https** hostname forwarding to the add-on's port 8098, set `external_url`, use a **Web application** client with `<external_url>/oauth/callback` registered, and the redirect completes on its own.
+If you have a public **https** hostname forwarding to the add-on's port 8098, set **OAuth redirect base URL**, use a **Web application** client with `<url>/oauth/callback` registered, and the redirect completes on its own.
 
 ### 3. Presets
 
@@ -42,6 +42,7 @@ Web UI → **Presets → Create**. A preset is everything a regular service need
 | Description | copied to each broadcast |
 | Usual day and time | pre-fills Date and Time with the next occurrence that isn't already scheduled |
 | Privacy | public / unlisted / private |
+| Category | YouTube video category, from the channel's country (US list if the channel has none); *YouTube default* leaves it to YouTube |
 | Stream key | the channel's stream key OBS is configured with; a broadcast without one can never go live |
 | Thumbnail | from the **Images** library or uploaded here |
 
@@ -51,7 +52,7 @@ Web UI → **Presets → Create**. A preset is everything a regular service need
 
 ### Schedule (dashboard, *YouTube Live Scheduling* device)
 
-Pick a **Preset** — **Date** and **Time** jump to its next free usual slot — adjust if this week differs, press **Schedule**. The broadcast is created with the preset's title, description, privacy, stream key and thumbnail, and appears in the **Broadcast** select. Schedule is greyed while no preset is chosen, the preset has no stream key, or the slot is in the past. It never changes which broadcast the panel is on.
+Pick a **Preset** — **Date** and **Time** jump to its next free usual slot — adjust if this week differs, press **Schedule**. The broadcast is created with the preset's title, description, privacy, stream key and thumbnail, and appears in the **Broadcast** select. Schedule is greyed while no preset is chosen, the preset has no stream key, or the slot is in the past. It never changes which broadcast Home Assistant is on.
 
 ### Operate (dashboard, *YouTube Live* device)
 
@@ -76,7 +77,7 @@ Pick a **Preset** — **Date** and **Time** jump to its next free usual slot —
 
 | Tab | Purpose |
 | --- | --- |
-| Broadcasts | schedule from a preset with a full form (any date, off-pattern services); edit title, description, date and time, privacy, stream key, thumbnail; delete. *Never started* lists broadcasts scheduled more than a day ago that never went live — hidden from the panel — for cleanup. |
+| Broadcasts | schedule from a preset with a full form (any date, off-pattern services); edit title, description, date and time, privacy, category, stream key, thumbnail; delete. *Never started* lists broadcasts scheduled more than a day ago that never went live — hidden from Home Assistant — for cleanup. |
 | Presets | create, edit, duplicate; delete from a preset's page |
 | Images | the thumbnail library: upload once, pick anywhere; delete once no preset uses it |
 | Connection | Google account and channel |
@@ -127,26 +128,27 @@ YouTube's API has no push, so the add-on polls — only while a broadcast is sel
 
 | Tier | When | Cadence |
 | --- | --- | --- |
-| Idle | nothing happening | `idle_poll_minutes` |
-| Live | broadcast on air | `live_poll_seconds` |
-| Fast | **Fast refresh** window | `fast_poll_seconds` for `fast_mode_minutes` |
+| Idle | nothing happening | **Idle refresh** (also refreshes the broadcast list) |
+| Live | broadcast on air | **Live refresh** |
+| Fast | **Fast refresh** window | **Fast refresh** cadence for **Fast refresh duration** |
 
-Any interaction with the panel arms the fast window — including a refused button press, which is exactly when a fast answer is wanted. The add-on switches it off when the window expires; the switch is there to arm it by hand. The broadcast list refreshes every `list_poll_minutes`.
+Any interaction with the Home Assistant entities arms the fast window — including a refused button press, which is exactly when a fast answer is wanted. The add-on switches it off when the window expires; the switch is there to arm it by hand.
 
 Reads cost 1 quota unit and writes 50 against the API's 10,000/day default. At the defaults a service week uses well under a tenth of it. Actual usage is shown in Google Cloud Console under **APIs & Services → YouTube Data API v3 → Quotas**.
 
 ## Options
 
+Each option is described on the add-on's Configuration tab.
+
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `google_client_id`, `google_client_secret` | — | the OAuth client |
-| `external_url` | unset | https base URL forwarding to port 8098; changes the OAuth redirect from `localhost` to `<external_url>/oauth/callback` |
-| `list_poll_minutes` | 5 | broadcast list refresh (1–60) |
-| `fast_poll_seconds` | 3 | fast-window cadence (1–30) |
-| `fast_mode_minutes` | 5 | fast-window length (1–60) |
-| `live_poll_seconds` | 60 | cadence while live (15–600) |
-| `idle_poll_minutes` | 10 | cadence while idle (1–60) |
-| `log_level` | info | debug / info / warn / error |
+| Google client ID / secret | — | the OAuth client |
+| OAuth redirect base URL | unset | https base URL forwarding to port 8098; the redirect becomes `<url>/oauth/callback` |
+| Idle refresh | 600 s | list and selected-broadcast checks while nothing is happening (60–3600) |
+| Live refresh | 60 s | selected-broadcast checks while on air (15–600) |
+| Fast refresh | 3 s | cadence inside a fast-refresh window (1–30) |
+| Fast refresh duration | 300 s | how long the window stays on after an interaction (60–3600) |
+| Log level | info | debug / info / warn / error |
 
 ## Storage
 
@@ -159,8 +161,8 @@ Reads cost 1 quota unit and writes 50 against the API's 10,000/day default. At t
 | Entities unavailable; Authorization `unauthorized` | not connected, or Google revoked the token — connect in the web UI |
 | Authorization drops to `unauthorized` weekly | the consent screen is in *Testing*; press **Publish app** and reconnect once |
 | "Access blocked: … has not completed the Google verification process" | the account is not a test user; add it, or publish the app |
-| `Error 400: invalid_request` from Google | `external_url` is set to a plain-http or LAN address; leave it unset or use https |
-| `redirect_uri_mismatch` | with `external_url`: Web client must register `<external_url>/oauth/callback`; without: use a Desktop client |
+| `Error 400: invalid_request` from Google | OAuth redirect base URL is a plain-http or LAN address; leave it empty or use https |
+| `redirect_uri_mismatch` | with a redirect base URL: Web client must register `<url>/oauth/callback`; without: use a Desktop client |
 | Browser cannot reach `localhost:8098` after consent | expected — paste the URL into the web UI |
 | Google's chooser does not list the channel | the account is not a Brand Account manager of it |
 | Broadcast select is empty although a stream is scheduled | wrong channel (check **Channel**), or the broadcast is under *Never started* in the web UI |

@@ -31,7 +31,7 @@ var ErrImageInUse = errors.New("image is used by a preset")
 // ErrImageNotFound is returned for an unknown image id.
 var ErrImageNotFound = errors.New("image not found")
 
-const schemaVersion = 3
+const schemaVersion = 4
 
 var migrations = []string{
 	`CREATE TABLE presets (
@@ -66,6 +66,7 @@ var migrations = []string{
 		WHERE thumbnail_file != '';
 	ALTER TABLE presets DROP COLUMN thumbnail_file`,
 	`ALTER TABLE images DROP COLUMN name`,
+	`ALTER TABLE presets ADD COLUMN category_id TEXT NOT NULL DEFAULT ''`,
 }
 
 // Image is one library entry.
@@ -174,12 +175,12 @@ func (s *Store) ClearToken(ctx context.Context) error {
 	return s.DeleteSetting(ctx, KeyRefreshToken)
 }
 
-const presetColumns = "id, name, title_template, description, privacy, stream_id, weekday, time_of_day, image_id"
+const presetColumns = "id, name, title_template, description, privacy, stream_id, weekday, time_of_day, image_id, category_id"
 
 func scanPreset(row interface{ Scan(...any) error }) (preset.Preset, error) {
 	var p preset.Preset
 	var weekday int
-	err := row.Scan(&p.ID, &p.Name, &p.TitleTemplate, &p.Description, &p.Privacy, &p.StreamID, &weekday, &p.TimeOfDay, &p.ImageID)
+	err := row.Scan(&p.ID, &p.Name, &p.TitleTemplate, &p.Description, &p.Privacy, &p.StreamID, &weekday, &p.TimeOfDay, &p.ImageID, &p.CategoryID)
 	p.Weekday = time.Weekday(weekday)
 	return p, err
 }
@@ -228,16 +229,16 @@ func (s *Store) SavePreset(ctx context.Context, p preset.Preset) (preset.Preset,
 	if p.ID == "" {
 		p.ID = newID()
 		_, err := s.db.ExecContext(ctx,
-			"INSERT INTO presets (id, name, title_template, description, privacy, stream_id, weekday, time_of_day, image_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-			p.ID, p.Name, p.TitleTemplate, p.Description, p.Privacy, p.StreamID, int(p.Weekday), p.TimeOfDay, p.ImageID, now, now)
+			"INSERT INTO presets (id, name, title_template, description, privacy, stream_id, weekday, time_of_day, image_id, category_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			p.ID, p.Name, p.TitleTemplate, p.Description, p.Privacy, p.StreamID, int(p.Weekday), p.TimeOfDay, p.ImageID, p.CategoryID, now, now)
 		return p, err
 	}
 	if !validID(p.ID) {
 		return preset.Preset{}, preset.ErrNotFound
 	}
 	res, err := s.db.ExecContext(ctx,
-		"UPDATE presets SET name = ?, title_template = ?, description = ?, privacy = ?, stream_id = ?, weekday = ?, time_of_day = ?, image_id = ?, updated_at = ? WHERE id = ?",
-		p.Name, p.TitleTemplate, p.Description, p.Privacy, p.StreamID, int(p.Weekday), p.TimeOfDay, p.ImageID, now, p.ID)
+		"UPDATE presets SET name = ?, title_template = ?, description = ?, privacy = ?, stream_id = ?, weekday = ?, time_of_day = ?, image_id = ?, category_id = ?, updated_at = ? WHERE id = ?",
+		p.Name, p.TitleTemplate, p.Description, p.Privacy, p.StreamID, int(p.Weekday), p.TimeOfDay, p.ImageID, p.CategoryID, now, p.ID)
 	if err != nil {
 		return preset.Preset{}, err
 	}

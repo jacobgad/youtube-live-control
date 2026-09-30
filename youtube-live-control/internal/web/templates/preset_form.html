@@ -21,14 +21,11 @@
 
 <div class="row">
 <div class="field">
-<label for="weekday">Usual day</label>
-<select id="weekday" name="weekday">
-{{range weekdays}}<option value="{{printf "%d" .}}" {{if eq . $.Data.Preset.Weekday}}selected{{end}}>{{.}}</option>{{end}}
+<label for="category_id">Category</label>
+<select id="category_id" name="category_id">
+<option value="" {{if not .Preset.CategoryID}}selected{{end}}>YouTube default</option>
+{{range .Categories}}<option value="{{.ID}}" {{if eq .ID $.Data.Preset.CategoryID}}selected{{end}}>{{.Title}}</option>{{end}}
 </select>
-</div>
-<div class="field">
-<label for="time_of_day">Usual time</label>
-<input type="time" id="time_of_day" name="time_of_day" value="{{.Preset.TimeOfDay}}" required>
 </div>
 <div class="field">
 <label for="privacy">Privacy</label>
@@ -37,6 +34,19 @@
 <option value="unlisted" {{if eq .Preset.Privacy "unlisted"}}selected{{end}}>Unlisted</option>
 <option value="private" {{if eq .Preset.Privacy "private"}}selected{{end}}>Private</option>
 </select>
+</div>
+</div>
+
+<div class="row">
+<div class="field">
+<label for="weekday">Usual day</label>
+<select id="weekday" name="weekday">
+{{range weekdays}}<option value="{{printf "%d" .}}" {{if eq . $.Data.Preset.Weekday}}selected{{end}}>{{.}}</option>{{end}}
+</select>
+</div>
+<div class="field">
+<label for="time_of_day">Usual time</label>
+<input type="time" id="time_of_day" name="time_of_day" value="{{.Preset.TimeOfDay}}" required>
 </div>
 </div>
 
