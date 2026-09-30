@@ -10,6 +10,8 @@ import (
 	"maps"
 	"net/http"
 	"net/url"
+	"slices"
+	"strings"
 	"time"
 )
 
@@ -398,9 +400,8 @@ func (c *Client) ListStreams(ctx context.Context) ([]Stream, error) {
 
 // Channel identifies the YouTube channel the stored token acts on.
 type Channel struct {
-	ID      string
-	Title   string
-	Country string
+	ID    string
+	Title string
 }
 
 // Category is a YouTube video category available in the channel's country.
@@ -415,8 +416,7 @@ func (c *Client) MyChannel(ctx context.Context) (Channel, error) {
 		Items []struct {
 			ID      string `json:"id"`
 			Snippet struct {
-				Title   string `json:"title"`
-				Country string `json:"country"`
+				Title string `json:"title"`
 			} `json:"snippet"`
 		} `json:"items"`
 	}
@@ -427,22 +427,22 @@ func (c *Client) MyChannel(ctx context.Context) (Channel, error) {
 	if len(out.Items) == 0 {
 		return Channel{}, errors.New("token is not associated with any YouTube channel")
 	}
-	return Channel{ID: out.Items[0].ID, Title: out.Items[0].Snippet.Title, Country: out.Items[0].Snippet.Country}, nil
+	return Channel{ID: out.Items[0].ID, Title: out.Items[0].Snippet.Title}, nil
 }
 
-const fallbackRegion = "US"
+// Regional category lists omit categories Studio offers everywhere (AU lacks
+// Nonprofits & Activism entirely); the US assignable set is exactly Studio's list.
+const categoryRegion = "US"
 
-// ListCategories lists the video categories for a region as the API returns them; the
-// assignable flag is ignored because it contradicts Studio for some regions. Costs 1 quota unit.
-func (c *Client) ListCategories(ctx context.Context, regionCode string) ([]Category, error) {
-	if regionCode == "" {
-		regionCode = fallbackRegion
-	}
+// ListCategories lists the categories Studio offers, sorted by title. Costs 1 quota unit.
+func (c *Client) ListCategories(ctx context.Context) ([]Category, error) {
+	regionCode := categoryRegion
 	var out struct {
 		Items []struct {
 			ID      string `json:"id"`
 			Snippet struct {
-				Title string `json:"title"`
+				Title      string `json:"title"`
+				Assignable bool   `json:"assignable"`
 			} `json:"snippet"`
 		} `json:"items"`
 	}
@@ -452,8 +452,11 @@ func (c *Client) ListCategories(ctx context.Context, regionCode string) ([]Categ
 	}
 	categories := make([]Category, 0, len(out.Items))
 	for _, item := range out.Items {
-		categories = append(categories, Category{ID: item.ID, Title: item.Snippet.Title})
+		if item.Snippet.Assignable {
+			categories = append(categories, Category{ID: item.ID, Title: item.Snippet.Title})
+		}
 	}
+	slices.SortFunc(categories, func(a, b Category) int { return strings.Compare(a.Title, b.Title) })
 	return categories, nil
 }
 

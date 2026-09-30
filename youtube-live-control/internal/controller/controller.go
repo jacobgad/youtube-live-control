@@ -261,7 +261,7 @@ func (c *Controller) authChanged(ctx context.Context, authorized bool) {
 	if authorized {
 		c.session.armFast(c.now(), c.opts.FastRefreshDuration)
 	} else {
-		c.session.channel, c.session.country = "", ""
+		c.session.channel = ""
 	}
 	c.mu.Unlock()
 	c.log.Info("authorization_changed", "authorized", authorized)
@@ -285,9 +285,8 @@ func (c *Controller) identifyChannel(ctx context.Context) {
 	}
 	c.mu.Lock()
 	c.session.channel = channel.Title
-	c.session.country = channel.Country
 	c.mu.Unlock()
-	c.log.Info("channel_connected", "channelId", channel.ID, "title", channel.Title, "country", channel.Country)
+	c.log.Info("channel_connected", "channelId", channel.ID, "title", channel.Title)
 }
 
 func (c *Controller) snapshot() snapshot {

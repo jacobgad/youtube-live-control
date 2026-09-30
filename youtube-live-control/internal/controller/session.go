@@ -43,7 +43,6 @@ const (
 type session struct {
 	authorized bool
 	channel    string
-	country    string
 	broadcasts []youtube.Broadcast
 	stale      []youtube.Broadcast
 	labels     []string

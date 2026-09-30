@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.2
+
+- Category select shows exactly the 15 categories YouTube Studio offers, sorted by name. Regional API lists are unreliable (Australia's omits *Nonprofits & Activism* entirely), so the global assignable set is used.
+
 ## 1.6.1
 
 - Category list no longer filters on the API's `assignable` flag, which wrongly hid *Nonprofits & Activism* for some regions; every category the API returns for the channel's country is offered.

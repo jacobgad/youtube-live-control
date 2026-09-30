@@ -67,12 +67,9 @@ func (c *Controller) Streams(ctx context.Context) ([]youtube.Stream, error) {
 	return c.yt.ListStreams(ctx)
 }
 
-// Categories lists the video categories for the channel's country. Costs 1 quota unit.
+// Categories lists the video categories Studio offers, sorted by title. Costs 1 quota unit.
 func (c *Controller) Categories(ctx context.Context) ([]youtube.Category, error) {
-	c.mu.Lock()
-	country := c.session.country
-	c.mu.Unlock()
-	return c.yt.ListCategories(ctx, country)
+	return c.yt.ListCategories(ctx)
 }
 
 // VideoCategory reads a broadcast's current category; ok is false when the video is gone. Costs 1 quota unit.
