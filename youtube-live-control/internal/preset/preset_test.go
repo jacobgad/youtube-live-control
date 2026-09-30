@@ -1,70 +1,12 @@
 package preset
 
 import (
-	"errors"
 	"testing"
 	"time"
 )
 
 func sample() Preset {
 	return Preset{Name: "Sunday", TitleTemplate: "Sunday Service – {date}", Privacy: "public", StreamID: "s1", Weekday: time.Sunday, TimeOfDay: "09:30"}
-}
-
-func TestStoreRoundTrip(t *testing.T) {
-	store, err := Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	saved, err := store.Save(sample())
-	if err != nil || saved.ID == "" {
-		t.Fatalf("Save: %v (%+v)", err, saved)
-	}
-	if _, err := store.SetThumbnail(saved.ID, ".png", []byte("png")); err != nil {
-		t.Fatal(err)
-	}
-	got, err := store.Get(saved.ID)
-	if err != nil || got.Name != "Sunday" || got.ThumbnailFile != saved.ID+".png" {
-		t.Fatalf("Get = %+v, %v", got, err)
-	}
-	image, ct, ok, err := store.Thumbnail(saved.ID)
-	if err != nil || !ok || ct != "image/png" || string(image) != "png" {
-		t.Fatalf("Thumbnail = %q %q %v %v", image, ct, ok, err)
-	}
-	list, err := store.List()
-	if err != nil || len(list) != 1 {
-		t.Fatalf("List = %v, %v", list, err)
-	}
-	if err := store.Delete(saved.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := store.Get(saved.ID); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("after delete: %v", err)
-	}
-}
-
-func TestDuplicateCopiesRecordAndImage(t *testing.T) {
-	store, _ := Open(t.TempDir())
-	original, _ := store.Save(sample())
-	if _, err := store.SetThumbnail(original.ID, ".png", []byte("png")); err != nil {
-		t.Fatal(err)
-	}
-	copied, err := store.Duplicate(original.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if copied.ID == original.ID || copied.Name != "Sunday (copy)" || copied.StreamID != original.StreamID {
-		t.Fatalf("copy = %+v", copied)
-	}
-	image, _, ok, err := store.Thumbnail(copied.ID)
-	if err != nil || !ok || string(image) != "png" || copied.ThumbnailFile == original.ThumbnailFile {
-		t.Fatalf("copied image = %q %v %v (file %s)", image, ok, err, copied.ThumbnailFile)
-	}
-	if err := store.Delete(original.ID); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, ok, _ := store.Thumbnail(copied.ID); !ok {
-		t.Fatal("deleting the original must not remove the copy's image")
-	}
 }
 
 func TestValidate(t *testing.T) {
@@ -106,14 +48,5 @@ func TestTitleAndNextStart(t *testing.T) {
 	sameDayPast := time.Date(2025, 1, 5, 10, 0, 0, 0, time.Local)
 	if got := p.NextStart(sameDayPast); got.Day() != 12 {
 		t.Fatalf("same-day after start should pick next week, got %v", got)
-	}
-}
-
-func TestGetRejectsPathLikeIDs(t *testing.T) {
-	store, _ := Open(t.TempDir())
-	for _, id := range []string{"../x", "a/b", "", "ZZ"} {
-		if _, err := store.Get(id); !errors.Is(err, ErrNotFound) {
-			t.Fatalf("id %q: %v", id, err)
-		}
 	}
 }

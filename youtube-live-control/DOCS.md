@@ -29,7 +29,7 @@ If you have a public **https** hostname that forwards to the add-on's port 8098 
 
 **Which channel?** A channel only appears on Google's chooser if your Google account is an **owner or manager of its Brand Account** (listed at myaccount.google.com/brandaccounts). Access granted through *YouTube Studio → Settings → Permissions* is Studio-only and invisible to the API; the owner must add you as a Brand Account manager or connect the add-on themselves.
 
-The refresh token is stored in `/data/token.json` and survives restarts and updates. If Google revokes it the **Authorization** sensor flips to `unauthorized` and the web UI asks you to reconnect.
+The refresh token is stored in the add-on's database (`/data/ylc.sqlite`) and survives restarts and updates. If Google revokes it the **Authorization** sensor flips to `unauthorized` and the web UI asks you to reconnect.
 
 ## Configuration
 
@@ -74,7 +74,7 @@ Open it from the add-on's Info tab or the sidebar. It is restricted to Home Assi
 | Stream key | Which of the channel's stream keys (YouTube Studio → *Stream settings*) the broadcast is bound to — the one OBS is configured with. A broadcast without a stream key can never go live. |
 | Thumbnail | JPEG/PNG up to 2 MB, uploaded to every broadcast scheduled from the preset. |
 
-**Duplicate** copies a preset (with its thumbnail) as *<name> (copy)* and opens it for editing — the quick way to make a variant such as an evening service. Presets are stored in `/data/presets/`.
+**Duplicate** copies a preset (with its thumbnail) as *<name> (copy)* and opens it for editing — the quick way to make a variant such as an evening service. Presets live in `/data/ylc.sqlite`; their images in `/data/images/`. Home Assistant's add-on backups include both.
 
 **Broadcasts** — lists upcoming and live broadcasts (with the one currently on the Home Assistant panel marked), and *Never started* ones — scheduled more than a day ago and still `ready`, hidden from the panel, with a **Delete** button to clean them up.
 

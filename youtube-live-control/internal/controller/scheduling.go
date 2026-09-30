@@ -1,13 +1,9 @@
 package controller
 
 import (
-	"encoding/json"
-	"errors"
 	"fmt"
-	"os"
 	"time"
 
-	"github.com/jacobgad/youtube-live-control/internal/atomicfile"
 	"github.com/jacobgad/youtube-live-control/internal/preset"
 )
 
@@ -162,31 +158,4 @@ func (sc *scheduling) canSchedule(now time.Time) bool {
 	}
 	start := sc.start()
 	return !start.IsZero() && start.After(now)
-}
-
-type persistedState struct {
-	PresetID string `json:"preset_id"`
-}
-
-func loadState(path string) (persistedState, error) {
-	data, err := os.ReadFile(path) //nolint:gosec // path is fixed by the add-on
-	if errors.Is(err, os.ErrNotExist) {
-		return persistedState{}, nil
-	}
-	if err != nil {
-		return persistedState{}, err
-	}
-	var st persistedState
-	if err := json.Unmarshal(data, &st); err != nil {
-		return persistedState{}, err
-	}
-	return st, nil
-}
-
-func saveState(path string, st persistedState) error {
-	data, err := json.Marshal(st)
-	if err != nil {
-		return err
-	}
-	return atomicfile.Write(path, data, 0o600)
 }

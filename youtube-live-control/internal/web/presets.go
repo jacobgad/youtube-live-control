@@ -18,7 +18,7 @@ type presetsData struct {
 func (s *Server) handlePresets(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := requestContext(r)
 	defer cancel()
-	presets, err := s.presets.List()
+	presets, err := s.store.ListPresets(ctx)
 	if err != nil {
 		s.log.Error("presets_list_failed", "error", err.Error())
 	}
@@ -40,7 +40,7 @@ func (s *Server) handlePresetForm(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	data := presetFormData{IsNew: true, Preset: preset.Preset{Privacy: "public", Weekday: time.Sunday, TimeOfDay: "09:30", TitleTemplate: "Sunday Service – " + preset.DatePlaceholder}}
 	if id := r.PathValue("id"); id != "" {
-		p, err := s.presets.Get(id)
+		p, err := s.store.GetPreset(ctx, id)
 		if err != nil {
 			s.redirect(w, r, "/presets", "error", "That preset no longer exists.")
 			return
@@ -74,58 +74,54 @@ func (s *Server) handleSavePreset(w http.ResponseWriter, r *http.Request) {
 		Weekday:       time.Weekday(weekday),
 		TimeOfDay:     r.FormValue("time_of_day"),
 	}
-	if p.ID != "" {
-		existing, err := s.presets.Get(p.ID)
-		if err != nil {
-			s.redirect(w, r, "/presets", "error", "That preset no longer exists.")
-			return
-		}
-		p.ThumbnailFile = existing.ThumbnailFile
-	}
 	image, contentType, err := optionalUpload(r, "thumbnail")
 	if err == nil {
-		p, err = s.presets.Save(p)
+		p, err = s.store.SavePreset(ctx, p)
 	}
 	if err == nil && image != nil {
 		ext := ".jpg"
 		if contentType == "image/png" {
 			ext = ".png"
 		}
-		_, err = s.presets.SetThumbnail(p.ID, ext, image)
+		_, err = s.store.SetThumbnail(ctx, p.ID, ext, image)
 	}
 	if err != nil {
 		s.render(w, r, "preset_form", "Preset", presetFormData{Preset: p, Streams: s.streams(ctx), IsNew: p.ID == ""}, err.Error())
 		return
 	}
 	s.log.Info("preset_saved", "id", p.ID, "name", p.Name)
-	s.ctrl.PresetsChanged()
+	s.ctrl.PresetsChanged(ctx)
 	s.redirect(w, r, "/presets", "notice", "Saved preset “"+p.Name+"”.")
 }
 
 func (s *Server) handleDeletePreset(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := requestContext(r)
+	defer cancel()
 	id := r.PathValue("id")
-	if err := s.presets.Delete(id); err != nil && !errors.Is(err, preset.ErrNotFound) {
+	if err := s.store.DeletePreset(ctx, id); err != nil && !errors.Is(err, preset.ErrNotFound) {
 		s.redirect(w, r, "/presets", "error", "Could not delete the preset: "+err.Error())
 		return
 	}
 	s.log.Info("preset_deleted", "id", id)
-	s.ctrl.PresetsChanged()
+	s.ctrl.PresetsChanged(ctx)
 	s.redirect(w, r, "/presets", "notice", "Preset deleted.")
 }
 
 func (s *Server) handleDuplicatePreset(w http.ResponseWriter, r *http.Request) {
-	copied, err := s.presets.Duplicate(r.PathValue("id"))
+	ctx, cancel := requestContext(r)
+	defer cancel()
+	copied, err := s.store.DuplicatePreset(ctx, r.PathValue("id"))
 	if err != nil {
 		s.redirect(w, r, "/presets", "error", "Could not duplicate the preset: "+err.Error())
 		return
 	}
 	s.log.Info("preset_duplicated", "from", r.PathValue("id"), "id", copied.ID)
-	s.ctrl.PresetsChanged()
+	s.ctrl.PresetsChanged(ctx)
 	s.redirect(w, r, "/presets/"+copied.ID, "notice", "Duplicated as “"+copied.Name+"” — rename it and adjust what differs.")
 }
 
 func (s *Server) handlePresetThumbnail(w http.ResponseWriter, r *http.Request) {
-	image, contentType, ok, err := s.presets.Thumbnail(r.PathValue("id"))
+	image, contentType, ok, err := s.store.Thumbnail(r.Context(), r.PathValue("id"))
 	if err != nil || !ok {
 		http.NotFound(w, r)
 		return

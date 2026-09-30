@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -99,18 +98,5 @@ func TestPresetListChangesKeepOrDropSelection(t *testing.T) {
 	sc.setPresets(nil)
 	if opts := sc.presetOptions(); len(opts) != 1 || opts[0] != noPresetLabel {
 		t.Fatalf("empty options = %v", opts)
-	}
-}
-
-func TestStateRoundTrip(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "state.json")
-	if st, err := loadState(path); err != nil || st.PresetID != "" {
-		t.Fatalf("missing file: %+v %v", st, err)
-	}
-	if err := saveState(path, persistedState{PresetID: "abc"}); err != nil {
-		t.Fatal(err)
-	}
-	if st, err := loadState(path); err != nil || st.PresetID != "abc" {
-		t.Fatalf("round trip: %+v %v", st, err)
 	}
 }

@@ -15,7 +15,7 @@ import (
 
 	"github.com/jacobgad/youtube-live-control/internal/config"
 	"github.com/jacobgad/youtube-live-control/internal/mqtt"
-	"github.com/jacobgad/youtube-live-control/internal/preset"
+	"github.com/jacobgad/youtube-live-control/internal/store"
 	"github.com/jacobgad/youtube-live-control/internal/youtube"
 )
 
@@ -26,28 +26,26 @@ const (
 
 // Deps are the controller's collaborators.
 type Deps struct {
-	YouTube   *youtube.Client
-	Auth      *youtube.Auth
-	MQTT      mqtt.Connection
-	Presets   *preset.Store
-	StatePath string
-	Options   config.Options
-	Log       *slog.Logger
-	Origin    mqtt.Origin
-	Now       func() time.Time
+	YouTube *youtube.Client
+	Auth    *youtube.Auth
+	MQTT    mqtt.Connection
+	Store   *store.Store
+	Options config.Options
+	Log     *slog.Logger
+	Origin  mqtt.Origin
+	Now     func() time.Time
 }
 
 // Controller is the add-on's long-lived core. Create it with New and drive it with Start/Stop.
 type Controller struct {
-	yt        *youtube.Client
-	auth      *youtube.Auth
-	mqtt      mqtt.Connection
-	presets   *preset.Store
-	statePath string
-	opts      config.Options
-	log       *slog.Logger
-	now       func() time.Time
-	pub       *publisher
+	yt    *youtube.Client
+	auth  *youtube.Auth
+	mqtt  mqtt.Connection
+	store *store.Store
+	opts  config.Options
+	log   *slog.Logger
+	now   func() time.Time
+	pub   *publisher
 
 	mu      sync.Mutex
 	session session
@@ -86,8 +84,7 @@ func New(deps Deps) *Controller {
 		yt:         deps.YouTube,
 		auth:       deps.Auth,
 		mqtt:       deps.MQTT,
-		presets:    deps.Presets,
-		statePath:  deps.StatePath,
+		store:      deps.Store,
 		opts:       deps.Options,
 		log:        log,
 		now:        now,
@@ -128,15 +125,15 @@ func (c *Controller) Start(ctx context.Context) error {
 	if !c.started.CompareAndSwap(false, true) {
 		return nil
 	}
-	state, err := loadState(c.statePath)
+	lastPreset, _, err := c.store.Setting(ctx, store.KeyLastPreset)
 	if err != nil {
-		c.log.Warn("state_read_failed", "path", c.statePath, "error", err.Error())
+		c.log.Warn("state_read_failed", "error", err.Error())
 	}
 	c.mu.Lock()
 	c.session.authorized = c.auth.Authorized()
-	c.session.sched.presetID = state.PresetID
+	c.session.sched.presetID = lastPreset
 	c.mu.Unlock()
-	c.loadPresets()
+	c.loadPresets(ctx)
 	c.log.Info("controller_started", "authorized", c.auth.Authorized(), "options", c.opts)
 
 	waitCtx, cancel := context.WithTimeout(ctx, mqttStartupWait)
@@ -425,14 +422,14 @@ func (c *Controller) snapBack(topics ...string) {
 }
 
 // PresetsChanged reloads presets after the web UI edits them.
-func (c *Controller) PresetsChanged() {
-	c.loadPresets()
+func (c *Controller) PresetsChanged(ctx context.Context) {
+	c.loadPresets(ctx)
 	c.resetScheduleDefaults()
 	c.publishUpdate()
 }
 
-func (c *Controller) loadPresets() {
-	list, err := c.presets.List()
+func (c *Controller) loadPresets(ctx context.Context) {
+	list, err := c.store.ListPresets(ctx)
 	if err != nil {
 		c.log.Error("presets_list_failed", "error", err.Error())
 		return
@@ -461,9 +458,11 @@ func (c *Controller) selectPreset(label string) {
 	c.session.sched.applyDefaults(c.now(), c.session.allStarts())
 	c.mu.Unlock()
 	c.log.Info("preset_selected", "id", id, "name", label)
-	if err := saveState(c.statePath, persistedState{PresetID: id}); err != nil {
-		c.log.Warn("state_persist_failed", "path", c.statePath, "error", err.Error())
-	}
+	c.background(func(ctx context.Context) {
+		if err := c.store.SetSetting(ctx, store.KeyLastPreset, id); err != nil {
+			c.log.Warn("state_persist_failed", "error", err.Error())
+		}
+	})
 	c.publishUpdate()
 }
 
@@ -506,7 +505,7 @@ func (c *Controller) schedulePressed() {
 		return
 	}
 	req := NewBroadcast{Edit: Edit{Title: p.Title(start), Description: p.Description, Start: start, Privacy: p.Privacy, StreamID: p.StreamID}}
-	image, ct, has, err := c.presets.Thumbnail(p.ID)
+	image, ct, has, err := c.store.Thumbnail(c.lifetime, p.ID)
 	if err != nil {
 		c.log.Warn("preset_thumbnail_unreadable", "preset", p.ID, "error", err.Error())
 	} else if has {

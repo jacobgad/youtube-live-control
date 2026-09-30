@@ -11,12 +11,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/jacobgad/youtube-live-control/internal/atomicfile"
 )
 
 const (
@@ -33,11 +30,18 @@ const (
 // ErrNotAuthorized is returned while no usable refresh token is stored.
 var ErrNotAuthorized = errors.New("youtube: not authorized; open the add-on web UI and connect a Google account")
 
+// TokenStore persists the refresh token between runs.
+type TokenStore interface {
+	LoadToken(ctx context.Context) (token string, ok bool, err error)
+	SaveToken(ctx context.Context, token string) error
+	ClearToken(ctx context.Context) error
+}
+
 // Auth holds the OAuth client and the stored refresh token, and mints access tokens.
 type Auth struct {
 	clientID     string
 	clientSecret string
-	tokenPath    string
+	tokens       TokenStore
 	hc           *http.Client
 	log          *slog.Logger
 	now          func() time.Time
@@ -50,14 +54,14 @@ type Auth struct {
 }
 
 // NewAuth wires the OAuth client; call Load before use.
-func NewAuth(clientID, clientSecret, tokenPath string, log *slog.Logger) *Auth {
+func NewAuth(clientID, clientSecret string, tokens TokenStore, log *slog.Logger) *Auth {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Auth{
 		clientID:     clientID,
 		clientSecret: clientSecret,
-		tokenPath:    tokenPath,
+		tokens:       tokens,
 		hc:           &http.Client{Timeout: 30 * time.Second},
 		log:          log,
 		now:          time.Now,
@@ -88,28 +92,17 @@ func (a *Auth) OnChange(fn func(authorized bool)) {
 // Configured reports whether a Google OAuth client is set in the add-on options.
 func (a *Auth) Configured() bool { return a.clientID != "" && a.clientSecret != "" }
 
-type tokenFile struct {
-	RefreshToken string `json:"refresh_token"`
-}
-
-// Load reads the persisted refresh token; a missing file is a normal first run.
-func (a *Auth) Load() error {
-	data, err := os.ReadFile(a.tokenPath) //nolint:gosec // path is fixed by the add-on
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
+// Load reads the persisted refresh token; none stored is a normal first run.
+func (a *Auth) Load(ctx context.Context) error {
+	token, ok, err := a.tokens.LoadToken(ctx)
 	if err != nil {
-		return fmt.Errorf("read %s: %w", a.tokenPath, err)
-	}
-	var tf tokenFile
-	if err := json.Unmarshal(data, &tf); err != nil {
-		return fmt.Errorf("parse %s: %w", a.tokenPath, err)
+		return fmt.Errorf("load refresh token: %w", err)
 	}
 	a.mu.Lock()
-	a.refresh = tf.RefreshToken
+	a.refresh = token
 	a.mu.Unlock()
-	if tf.RefreshToken != "" {
-		a.log.Info("token_loaded", "path", a.tokenPath)
+	if ok && token != "" {
+		a.log.Info("token_loaded")
 	}
 	return nil
 }
@@ -158,8 +151,8 @@ func (a *Auth) Exchange(ctx context.Context, code, redirectURI string) error {
 	if resp.RefreshToken == "" {
 		return errors.New("google returned no refresh token; remove the app's access at myaccount.google.com/permissions and connect again")
 	}
-	if err := a.persist(resp.RefreshToken); err != nil {
-		return err
+	if err := a.tokens.SaveToken(ctx, resp.RefreshToken); err != nil {
+		return fmt.Errorf("save refresh token: %w", err)
 	}
 	a.mu.Lock()
 	a.refresh = resp.RefreshToken
@@ -167,7 +160,7 @@ func (a *Auth) Exchange(ctx context.Context, code, redirectURI string) error {
 	a.expiry = a.now().Add(time.Duration(resp.ExpiresIn) * time.Second)
 	notify := a.onChange
 	a.mu.Unlock()
-	a.log.Info("authorization_granted", "path", a.tokenPath)
+	a.log.Info("authorization_granted")
 	if notify != nil {
 		notify(true)
 	}
@@ -196,7 +189,7 @@ func (a *Auth) AccessToken(ctx context.Context) (string, error) {
 	if err != nil {
 		var oe *oauthError
 		if errors.As(err, &oe) && oe.Code == "invalid_grant" {
-			a.revoke(refresh)
+			a.revoke(ctx, refresh)
 			return "", ErrNotAuthorized
 		}
 		return "", err
@@ -210,7 +203,7 @@ func (a *Auth) AccessToken(ctx context.Context) (string, error) {
 
 // Flips the UI and Authorization sensor to unauthorized instead of erroring forever;
 // only the token that failed is cleared, so a consent that landed meanwhile is kept.
-func (a *Auth) revoke(failed string) {
+func (a *Auth) revoke(ctx context.Context, failed string) {
 	a.mu.Lock()
 	if a.refresh != failed {
 		a.mu.Unlock()
@@ -220,8 +213,8 @@ func (a *Auth) revoke(failed string) {
 	a.access = ""
 	notify := a.onChange
 	a.mu.Unlock()
-	if err := os.Remove(a.tokenPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		a.log.Warn("token_delete_failed", "path", a.tokenPath, "error", err.Error())
+	if err := a.tokens.ClearToken(context.WithoutCancel(ctx)); err != nil {
+		a.log.Warn("token_delete_failed", "error", err.Error())
 	}
 	a.log.Warn("authorization_revoked", "detail", "google rejected the refresh token; reconnect via the web UI")
 	if notify != nil {
@@ -261,12 +254,4 @@ func (a *Auth) tokenRequest(ctx context.Context, form url.Values) (tokenResponse
 		return tokenResponse{}, &oauthError{Code: tr.Error, Description: tr.ErrorDescription, HTTPStatus: resp.StatusCode}
 	}
 	return tr, nil
-}
-
-func (a *Auth) persist(refreshToken string) error {
-	data, err := json.Marshal(tokenFile{RefreshToken: refreshToken}) //nolint:gosec // persisting the refresh token to /data is this function's purpose
-	if err != nil {
-		return err
-	}
-	return atomicfile.Write(a.tokenPath, data, 0o600)
 }

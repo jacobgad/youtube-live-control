@@ -83,11 +83,10 @@ func (m MQTT) LogValue() slog.Value {
 
 // Config is everything the binary needs to start.
 type Config struct {
-	Options    Options
-	MQTT       MQTT
-	TokenPath  string
-	PresetsDir string
-	StatePath  string
+	Options      Options
+	MQTT         MQTT
+	DatabasePath string
+	ImagesDir    string
 }
 
 type rawOptions struct {
@@ -239,11 +238,10 @@ func Load(ctx context.Context) (Config, error) {
 		return Config{}, err
 	}
 	return Config{
-		Options:    opts,
-		MQTT:       mqtt,
-		TokenPath:  envOr("YLC_TOKEN_PATH", "/data/token.json"),
-		PresetsDir: envOr("YLC_PRESETS_DIR", "/data/presets"),
-		StatePath:  envOr("YLC_STATE_PATH", "/data/state.json"),
+		Options:      opts,
+		MQTT:         mqtt,
+		DatabasePath: envOr("YLC_DATABASE_PATH", "/data/ylc.sqlite"),
+		ImagesDir:    envOr("YLC_IMAGES_DIR", "/data/images"),
 	}, nil
 }
 

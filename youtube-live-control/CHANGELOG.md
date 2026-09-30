@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.4.0
+
+**Fresh setup required.** Storage moves to one SQLite database (`/data/ylc.sqlite`) plus one images directory (`/data/images/`): presets, the last-used preset and the Google refresh token are all in the database, with a versioned schema for future migrations. Nothing is imported from the 1.x JSON files — after updating, connect the Google account again and recreate presets. Backups now mean two paths.
+
 ## 1.3.2
 
 - Scheduling device: **Date** and **Time** are two entities again — Home Assistant's native `date` and `time` pickers (MQTT platforms, 2026.5+) — because the combined `datetime` entity does not render well in cards. Still any minute; the retired `datetime` config is cleared on start.

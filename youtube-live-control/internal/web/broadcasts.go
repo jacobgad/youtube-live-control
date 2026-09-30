@@ -21,7 +21,9 @@ type broadcastsData struct {
 }
 
 func (s *Server) handleBroadcasts(w http.ResponseWriter, r *http.Request) {
-	presets, err := s.presets.List()
+	ctx, cancel := requestContext(r)
+	defer cancel()
+	presets, err := s.store.ListPresets(ctx)
 	if err != nil {
 		s.log.Error("presets_list_failed", "error", err.Error())
 	}
@@ -45,7 +47,7 @@ type broadcastForm struct {
 func (s *Server) handleNewBroadcastForm(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := requestContext(r)
 	defer cancel()
-	p, err := s.presets.Get(r.URL.Query().Get("preset"))
+	p, err := s.store.GetPreset(ctx, r.URL.Query().Get("preset"))
 	if err != nil {
 		s.redirect(w, r, "/broadcasts", "error", "Pick a preset to schedule a new stream.")
 		return
@@ -74,7 +76,7 @@ func (s *Server) handleNewBroadcast(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if image == nil && form.PresetID != "" {
-		if data, ct, ok, err := s.presets.Thumbnail(form.PresetID); err == nil && ok {
+		if data, ct, ok, err := s.store.Thumbnail(ctx, form.PresetID); err == nil && ok {
 			image, contentType = data, ct
 		}
 	}

@@ -17,7 +17,7 @@ import (
 
 	"github.com/jacobgad/youtube-live-control/internal/config"
 	"github.com/jacobgad/youtube-live-control/internal/controller"
-	"github.com/jacobgad/youtube-live-control/internal/preset"
+	"github.com/jacobgad/youtube-live-control/internal/store"
 	"github.com/jacobgad/youtube-live-control/internal/youtube"
 )
 
@@ -39,12 +39,12 @@ var templateFS embed.FS
 
 // Server is the ingress UI plus the OAuth callback listener.
 type Server struct {
-	auth    *youtube.Auth
-	ctrl    *controller.Controller
-	presets *preset.Store
-	opts    config.Options
-	log     *slog.Logger
-	pages   map[string]*template.Template
+	auth  *youtube.Auth
+	ctrl  *controller.Controller
+	store *store.Store
+	opts  config.Options
+	log   *slog.Logger
+	pages map[string]*template.Template
 
 	mu     sync.Mutex
 	states map[string]stateEntry
@@ -56,18 +56,18 @@ type stateEntry struct {
 }
 
 // New builds the server; Run starts it.
-func New(auth *youtube.Auth, ctrl *controller.Controller, presets *preset.Store, opts config.Options, log *slog.Logger) *Server {
+func New(auth *youtube.Auth, ctrl *controller.Controller, st *store.Store, opts config.Options, log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.Default()
 	}
 	return &Server{
-		auth:    auth,
-		ctrl:    ctrl,
-		presets: presets,
-		opts:    opts,
-		log:     log,
-		pages:   parsePages(),
-		states:  map[string]stateEntry{},
+		auth:   auth,
+		ctrl:   ctrl,
+		store:  st,
+		opts:   opts,
+		log:    log,
+		pages:  parsePages(),
+		states: map[string]stateEntry{},
 	}
 }
 

@@ -10,7 +10,7 @@ User documentation: [`youtube-live-control/DOCS.md`](youtube-live-control/DOCS.m
 Home Assistant ──MQTT──▶ Mosquitto ◀──MQTT── YouTube Live Control ──HTTPS──▶ YouTube Data API v3
       │                                        │
       └─ ingress web UI ───────────────────────┼─ OAuth consent · presets · schedule/edit broadcasts
-                                               ├─ refresh token in /data/token.json
+                                               ├─ SQLite (/data/ylc.sqlite) + /data/images
                                                ├─ tiered polling: idle 10 min · live 60 s · fast 3 s
                                                └─ commands: verify → write → read back
 ```
@@ -22,7 +22,7 @@ Home Assistant ──MQTT──▶ Mosquitto ◀──MQTT── YouTube Live Co
 - **Quota-aware, presence-driven polling.** Three tiers, all only while a broadcast is selected: a 10-minute idle baseline, a 60-second cadence while live, and a 3-second fast window (~40 units/min, capped at 5 minutes) armed by any panel interaction — including refused button presses — or by the **Fast refresh** switch, which the add-on itself turns off on expiry. A countdown sensor shows minutes remaining.
 - **Configuration and control are separate.** Poll cadences and the fast window are add-on options; the MQTT device carries only what operates YouTube.
 
-Single static Go binary on plain Alpine. The only web surface is the ingress OAuth console plus a `:8098` redirect endpoint. Google's OAuth policy only allows plain-`http` redirects to localhost, so by default consent uses a **Desktop app** client with a `http://localhost:8098` redirect and the volunteer pastes the resulting URL back into the console; an https `external_url` in front of `:8098` makes the redirect complete on its own.
+Everything the add-on remembers — presets, settings, the refresh token — lives in one SQLite file (`/data/ylc.sqlite`, pure-Go driver, schema versioned via `user_version`) with thumbnails in `/data/images/`: two paths to back up, one schema to migrate. Single static Go binary on plain Alpine. The only web surface is the ingress OAuth console plus a `:8098` redirect endpoint. Google's OAuth policy only allows plain-`http` redirects to localhost, so by default consent uses a **Desktop app** client with a `http://localhost:8098` redirect and the volunteer pastes the resulting URL back into the console; an https `external_url` in front of `:8098` makes the redirect complete on its own.
 
 ## MQTT contract
 
@@ -73,4 +73,4 @@ golangci-lint run
 docker build --build-arg BUILD_VERSION=dev .
 ```
 
-Run outside the Supervisor by setting `MQTT_HOST` (plus `MQTT_PORT`/`MQTT_USERNAME`/`MQTT_PASSWORD`/`MQTT_SSL`), `YLC_OPTIONS_PATH` to a local options JSON, `YLC_TOKEN_PATH` for the token file.
+Run outside the Supervisor by setting `MQTT_HOST` (plus `MQTT_PORT`/`MQTT_USERNAME`/`MQTT_PASSWORD`/`MQTT_SSL`), `YLC_OPTIONS_PATH` to a local options JSON, `YLC_DATABASE_PATH` and `YLC_IMAGES_DIR` for local storage.

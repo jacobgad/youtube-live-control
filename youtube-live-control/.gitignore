@@ -1,1 +1,3 @@
 /youtube-live-control
+*.sqlite
+*.sqlite-*
