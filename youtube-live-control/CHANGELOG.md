@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.8.0
+
+- Scheduling device gains **Privacy**, pre-filled from the preset and overridable per stream; cleared with the rest after Schedule.
+- **Delete** button on the selected-broadcast device, unavailable while the broadcast is live or transitioning.
+- Dead fields removed (`Stream.IsReusable`, `Stream.Status`, `Image.CreatedAt`); `liveStreams.list` asks for fewer parts.
+
 ## 1.7.1
 
 - Double-tap protection: one in-flight instance per command. While Go Live, End Stream or Schedule runs, its button is unavailable in Home Assistant; a second press is ignored and logged. Web forms disable their buttons on submit, and a duplicate request is refused with "already in progress".

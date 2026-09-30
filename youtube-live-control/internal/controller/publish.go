@@ -38,8 +38,10 @@ type snapshot struct {
 	fastMode       bool
 	fastRemaining  int
 	gates          gates
+	canDelete      bool
 	presetLabel    string
 	start          string
+	schedPrivacy   string
 	canSchedule    bool
 }
 
@@ -132,8 +134,10 @@ func render(snap snapshot, origin mqtt.Origin) []message {
 		message{mqtt.StatusState, snap.status},
 		message{mqtt.GoLiveAvailability, onOff(snap.gates.goLive, mqtt.PayloadOnline, mqtt.PayloadOffline)},
 		message{mqtt.EndAvailability, onOff(snap.gates.end, mqtt.PayloadOnline, mqtt.PayloadOffline)},
+		message{mqtt.DeleteAvailability, onOff(snap.canDelete, mqtt.PayloadOnline, mqtt.PayloadOffline)},
 		message{mqtt.PresetState, snap.presetLabel},
 		message{mqtt.StartState, snap.start},
+		message{mqtt.SchedulePrivacyState, snap.schedPrivacy},
 		message{mqtt.ScheduleAvailability, onOff(snap.canSchedule, mqtt.PayloadOnline, mqtt.PayloadOffline)},
 	)
 	return out

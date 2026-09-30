@@ -105,8 +105,10 @@ func New(deps Deps) *Controller {
 		FastModeSwitched:  c.switchFastMode,
 		GoLivePressed:     func() { c.pressed("go_live", c.goLive) },
 		EndPressed:        func() { c.pressed("end_stream", c.endStream) },
+		DeletePressed:     func() { c.pressed("delete", c.deleteSelected) },
 		PresetSelected:    c.selectPreset,
 		StartEntered:      c.enterStart,
+		SchedulePrivacy:   c.selectSchedulePrivacy,
 		SchedulePressed:   c.schedulePressed,
 		HomeAssistantOnline: func() {
 			c.background(func(ctx context.Context) { c.pub.everything(ctx, c.snapshot) })
@@ -354,6 +356,8 @@ func (c *Controller) snapshot() snapshot {
 		gates:         computeGates(c.session.authorized, current, c.busy["go_live"], c.busy["end_stream"]),
 		presetLabel:   c.session.sched.presetLabel(),
 		start:         c.session.sched.startPayload(),
+		schedPrivacy:  c.session.sched.privacy,
+		canDelete:     c.session.authorized && b != nil && !c.busy["delete"] && !isOnAir(current) && current != stageStarting && current != stageEnding,
 		canSchedule:   c.session.authorized && !c.busy["schedule"] && c.session.sched.canSchedule(now),
 	}
 	if b != nil {
@@ -497,6 +501,18 @@ func (c *Controller) selectPreset(label string) {
 	c.publishUpdate()
 }
 
+func (c *Controller) selectSchedulePrivacy(privacy string) {
+	if !youtube.ValidPrivacy(privacy) {
+		c.log.Warn("privacy_rejected", "payload", privacy)
+		c.snapBack(mqtt.SchedulePrivacyState)
+		return
+	}
+	c.mu.Lock()
+	c.session.sched.privacy = privacy
+	c.mu.Unlock()
+	c.publishUpdate()
+}
+
 func (c *Controller) enterStart(raw string) {
 	start, err := parseStart(raw)
 	if err != nil {
@@ -515,6 +531,7 @@ func (c *Controller) schedulePressed() {
 	c.mu.Lock()
 	p := c.session.sched.preset()
 	start := c.session.sched.start
+	privacy := c.session.sched.privacy
 	ok := c.session.sched.canSchedule(c.now())
 	c.mu.Unlock()
 	if !ok || p == nil {
@@ -522,7 +539,10 @@ func (c *Controller) schedulePressed() {
 		c.publishUpdate()
 		return
 	}
-	req := NewBroadcast{Edit: Edit{Title: p.Title(start), Description: p.Description, Start: start, Privacy: p.Privacy, StreamID: p.StreamID, CategoryID: p.CategoryID}}
+	if privacy == "" {
+		privacy = p.Privacy
+	}
+	req := NewBroadcast{Edit: Edit{Title: p.Title(start), Description: p.Description, Start: start, Privacy: privacy, StreamID: p.StreamID, CategoryID: p.CategoryID}}
 	if p.ImageID != "" {
 		image, ct, err := c.store.ImageBytes(c.lifetime, p.ImageID)
 		if err != nil {

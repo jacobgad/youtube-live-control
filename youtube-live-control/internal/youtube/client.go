@@ -75,8 +75,6 @@ type Stream struct {
 	StreamKey  string
 	Resolution string
 	FrameRate  string
-	IsReusable bool
-	Status     string
 }
 
 // An update PUT overwrites every mutable field of each part sent; echoing the fetched
@@ -347,9 +345,6 @@ type streamItem struct {
 			Status string `json:"status"`
 		} `json:"healthStatus"`
 	} `json:"status"`
-	ContentDetails struct {
-		IsReusable bool `json:"isReusable"`
-	} `json:"contentDetails"`
 }
 
 type streamListResponse struct {
@@ -376,7 +371,7 @@ func (c *Client) StreamStatus(ctx context.Context, streamID string) (StreamStatu
 func (c *Client) ListStreams(ctx context.Context) ([]Stream, error) {
 	var out streamListResponse
 	err := c.do(ctx, http.MethodGet, apiBase+"/liveStreams", url.Values{
-		"part":       {"id,snippet,cdn,status,contentDetails"},
+		"part":       {"id,snippet,cdn"},
 		"mine":       {"true"},
 		"maxResults": {"50"},
 	}, nil, &out)
@@ -391,8 +386,6 @@ func (c *Client) ListStreams(ctx context.Context) ([]Stream, error) {
 			StreamKey:  item.CDN.IngestionInfo.StreamName,
 			Resolution: item.CDN.Resolution,
 			FrameRate:  item.CDN.FrameRate,
-			IsReusable: item.ContentDetails.IsReusable,
-			Status:     item.Status.StreamStatus,
 		})
 	}
 	return streams, nil

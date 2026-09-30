@@ -134,6 +134,26 @@ func (c *Controller) endStream(ctx context.Context) error {
 	return nil
 }
 
+// A live or transitioning broadcast is never deleted from the panel; end it first.
+func (c *Controller) deleteSelected(ctx context.Context) error {
+	id, b, _, ok := c.verifySelected(ctx, "delete")
+	if !ok {
+		return ErrNoSelection
+	}
+	if isLive(b) || b.LifeCycleStatus == youtube.LifeLiveStarting {
+		c.log.Warn("command_refused", "command", "delete", "id", id, "lifeCycleStatus", b.LifeCycleStatus)
+		c.pub.update(ctx, c.snapshot)
+		return errors.New("broadcast is live")
+	}
+	if err := c.yt.DeleteBroadcast(ctx, id); err != nil && !youtube.HasReason(err, "liveBroadcastNotFound") {
+		c.log.Error("operation_failed", "operation", "delete", "id", id, "error", err)
+		return err
+	}
+	c.log.Info("broadcast_deleted", "id", id)
+	c.dropMissing(ctx, id)
+	return nil
+}
+
 // Commands decide on a fresh read, never on the last poll.
 func (c *Controller) verifySelected(ctx context.Context, op string) (string, youtube.Broadcast, youtube.StreamStatus, bool) {
 	c.mu.Lock()

@@ -16,6 +16,7 @@ type scheduling struct {
 	labels   []string
 	presetID string
 	start    time.Time
+	privacy  string
 }
 
 func (sc *scheduling) setPresets(list []preset.Preset) {
@@ -73,15 +74,17 @@ func (sc *scheduling) presetIDForLabel(label string) (string, bool) {
 func (sc *scheduling) clear() {
 	sc.presetID = ""
 	sc.start = time.Time{}
+	sc.privacy = ""
 }
 
 func (sc *scheduling) applyDefaults(now time.Time, taken []time.Time) {
 	p := sc.preset()
 	if p == nil {
-		sc.start = time.Time{}
+		sc.start, sc.privacy = time.Time{}, ""
 		return
 	}
 	sc.start = nextFreeSlot(*p, now, taken)
+	sc.privacy = p.Privacy
 }
 
 func nextFreeSlot(p preset.Preset, now time.Time, taken []time.Time) time.Time {

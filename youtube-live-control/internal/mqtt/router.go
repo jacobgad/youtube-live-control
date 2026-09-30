@@ -15,8 +15,10 @@ type Actions struct {
 	FastModeSwitched    func(on bool)
 	GoLivePressed       func()
 	EndPressed          func()
+	DeletePressed       func()
 	PresetSelected      func(label string)
 	StartEntered        func(raw string)
+	SchedulePrivacy     func(privacy string)
 	SchedulePressed     func()
 	HomeAssistantOnline func()
 }
@@ -24,8 +26,8 @@ type Actions struct {
 // Subscriptions are the topics the controller listens on.
 var Subscriptions = []string{
 	BroadcastSet, TitleSet, PrivacySet, FastModeSet,
-	GoLivePress, EndPress,
-	PresetSet, StartSet, SchedulePress,
+	GoLivePress, EndPress, DeletePress,
+	PresetSet, StartSet, SchedulePrivacySet, SchedulePress,
 	HAStatusTopic,
 }
 
@@ -53,6 +55,10 @@ func NewRouter(actions Actions, log *slog.Logger) MessageHandler {
 			actions.GoLivePressed()
 		case EndPress:
 			actions.EndPressed()
+		case DeletePress:
+			actions.DeletePressed()
+		case SchedulePrivacySet:
+			actions.SchedulePrivacy(text)
 		case PresetSet:
 			actions.PresetSelected(text)
 		case StartSet:

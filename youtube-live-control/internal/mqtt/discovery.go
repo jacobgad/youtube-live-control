@@ -44,6 +44,7 @@ const (
 	iconStatus    = "mdi:broadcast"
 	iconGoLive    = "mdi:play-circle"
 	iconEnd       = "mdi:stop-circle"
+	iconDelete    = "mdi:delete-outline"
 	iconAuth      = "mdi:shield-account"
 	iconPreset    = "mdi:playlist-star"
 	iconStart     = "mdi:calendar-clock"
@@ -81,6 +82,7 @@ func Messages(o Origin, opts Options) []Message {
 		binarySensor(NodeID, "encoder", "Encoder connected", EncoderState, "connectivity", o),
 		button(NodeID, "go_live", "Go Live", iconGoLive, GoLivePress, GoLiveAvailability, o),
 		button(NodeID, "end_stream", "End Stream", iconEnd, EndPress, EndAvailability, o),
+		button(NodeID, "delete", "Delete", iconDelete, DeletePress, DeleteAvailability, o),
 		commandEntity(NodeID, "switch", "fast_mode", "Fast refresh", iconFastMode, map[string]any{
 			"state_topic":   FastModeState,
 			"command_topic": FastModeSet,
@@ -101,6 +103,11 @@ func Messages(o Origin, opts Options) []Message {
 		commandEntity(SchedulingNodeID, "datetime", "start", "Start", iconStart, map[string]any{
 			"state_topic":   StartState,
 			"command_topic": StartSet,
+		}, o),
+		commandEntity(SchedulingNodeID, "select", "privacy", "Privacy", iconPrivacy, map[string]any{
+			"state_topic":   SchedulePrivacyState,
+			"command_topic": SchedulePrivacySet,
+			"options":       youtube.PrivacyOptions,
 		}, o),
 		button(SchedulingNodeID, "schedule", "Schedule", iconSchedule, SchedulePress, ScheduleAvailability, o),
 	}

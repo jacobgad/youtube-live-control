@@ -47,14 +47,18 @@ const (
 
 	GoLivePress = Prefix + "/go_live/press"
 	EndPress    = Prefix + "/end_stream/press"
+	DeletePress = Prefix + "/delete/press"
 
 	GoLiveAvailability = Prefix + "/go_live/availability"
 	EndAvailability    = Prefix + "/end_stream/availability"
+	DeleteAvailability = Prefix + "/delete/availability"
 
 	PresetState          = Prefix + "/preset/state"
 	PresetSet            = Prefix + "/preset/set"
 	StartState           = Prefix + "/start/state"
 	StartSet             = Prefix + "/start/set"
+	SchedulePrivacyState = Prefix + "/schedule_privacy/state"
+	SchedulePrivacySet   = Prefix + "/schedule_privacy/set"
 	SchedulePress        = Prefix + "/schedule/press"
 	ScheduleAvailability = Prefix + "/schedule/availability"
 )

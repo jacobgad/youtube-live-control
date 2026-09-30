@@ -28,6 +28,8 @@ func TestRouterDispatch(t *testing.T) {
 		EndPressed:          record("end"),
 		PresetSelected:      recordPayload("preset"),
 		StartEntered:        recordPayload("start"),
+		SchedulePrivacy:     recordPayload("schedule_privacy"),
+		DeletePressed:       record("delete"),
 		SchedulePressed:     record("schedule"),
 		HomeAssistantOnline: record("ha_online"),
 	}, slog.Default())
@@ -42,6 +44,8 @@ func TestRouterDispatch(t *testing.T) {
 	router(EndPress, []byte(PayloadPress))
 	router(PresetSet, []byte("Sunday"))
 	router(StartSet, []byte("2025-01-05T09:30:00+10:00"))
+	router(SchedulePrivacySet, []byte("unlisted"))
+	router(DeletePress, []byte(PayloadPress))
 	router(SchedulePress, []byte(PayloadPress))
 	router(HAStatusTopic, []byte("online"))
 	router(HAStatusTopic, []byte("offline"))
@@ -53,7 +57,7 @@ func TestRouterDispatch(t *testing.T) {
 		"privacy:unlisted",
 		"fast:on", "fast:off",
 		"go_live", "end",
-		"preset:Sunday", "start:2025-01-05T09:30:00+10:00", "schedule",
+		"preset:Sunday", "start:2025-01-05T09:30:00+10:00", "schedule_privacy:unlisted", "delete", "schedule",
 		"ha_online",
 	}
 	if len(got) != len(want) {

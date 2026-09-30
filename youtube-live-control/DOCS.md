@@ -52,7 +52,7 @@ Web UI → **Presets → Create**. A preset is everything a regular service need
 
 ### Schedule (dashboard, *YouTube Live Scheduling* device)
 
-Pick a **Preset** — **Start** jumps to its next free usual slot — adjust if this week differs, press **Schedule**. The broadcast is created with the preset's title, description, privacy, category, stream key and thumbnail and appears in the **Broadcast** select; Preset and Start clear to confirm. Schedule is greyed while no preset is chosen, the preset has no stream key, or the slot is in the past. It never changes which broadcast Home Assistant is on.
+Pick a **Preset** — **Start** jumps to its next free usual slot and **Privacy** to the preset's — adjust either if this stream differs, press **Schedule**. The broadcast is created with the preset's title, description, category, stream key and thumbnail and appears in the **Broadcast** select; the fields clear to confirm. Schedule is greyed while no preset is chosen, the preset has no stream key, or the slot is in the past. It never changes which broadcast Home Assistant is on.
 
 ### Operate (dashboard, *YouTube Live* device)
 
@@ -99,6 +99,7 @@ The web UI is for Home Assistant admins only.
 | Live | binary sensor (running) | on for `live`, `stream_stopping`, `ready_to_end` — for ON AIR lights and notifications |
 | Encoder connected | binary sensor (connectivity) | on while YouTube is receiving the stream |
 | Go Live / End Stream | buttons | available only in `ready_to_go_live` / `ready_to_end` |
+| Delete | button | removes the selected broadcast from YouTube; unavailable while it is live or transitioning |
 | Fast refresh / Fast refresh remaining | switch / sensor | the fast-poll window (below) |
 | Broadcast status, Stream health, Channel, Authorization | sensors (diagnostic) | raw YouTube values, connected channel, `authorized` / `unauthorized` |
 
@@ -108,6 +109,7 @@ The web UI is for Home Assistant admins only.
 | --- | --- |
 | Preset | select (empty until chosen) |
 | Start | datetime |
+| Privacy | select — pre-filled from the preset, overridable for this stream |
 | Schedule | button |
 
 Both devices appear under **Settings → Devices & services → MQTT**; Home Assistant's auto-generated dashboard gives each its own card. Invalid input (empty title, over 100 characters, unknown option) is rejected and the field snaps back.

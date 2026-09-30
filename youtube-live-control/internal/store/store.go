@@ -68,11 +68,10 @@ var migrations = []string{
 
 // Image is one library entry.
 type Image struct {
-	ID        string
-	File      string
-	Size      int64
-	UsedBy    int
-	CreatedAt time.Time
+	ID     string
+	File   string
+	Size   int64
+	UsedBy int
 }
 
 // ContentType is the MIME type implied by the file name.
@@ -271,13 +270,11 @@ func (s *Store) DeletePreset(ctx context.Context, id string) error {
 	return nil
 }
 
-const imageColumns = "i.id, i.file, i.size, i.created_at, (SELECT count(*) FROM presets p WHERE p.image_id = i.id)"
+const imageColumns = "i.id, i.file, i.size, (SELECT count(*) FROM presets p WHERE p.image_id = i.id)"
 
 func scanImage(row interface{ Scan(...any) error }) (Image, error) {
 	var img Image
-	var created int64
-	err := row.Scan(&img.ID, &img.File, &img.Size, &created, &img.UsedBy)
-	img.CreatedAt = time.Unix(created, 0)
+	err := row.Scan(&img.ID, &img.File, &img.Size, &img.UsedBy)
 	return img, err
 }
 

@@ -35,10 +35,10 @@ Prefix `ylc/`. State retained, commands not.
 | `scheduled_start/state` | RFC 3339, or `None` |
 | `thumbnail/{url,availability}` | image entity |
 | `live/state`, `encoder/state` | `ON`/`OFF` |
-| `{go_live,end_stream}/{press,availability}` | buttons and their gates |
+| `{go_live,end_stream,delete}/{press,availability}` | buttons and their gates |
 | `fast_mode/{state,set}`, `fast_mode_remaining/state` | fast-refresh window |
 | `{stream_health,broadcast_status}/state` | diagnostics |
-| `preset/{state,set}`, `date/{state,set}`, `time/{state,set}` | scheduling inputs (`date`/`time` platforms, HA ≥ 2026.5) |
+| `preset/{state,set}`, `start/{state,set}`, `schedule_privacy/{state,set}` | scheduling inputs; Start is a `datetime` entity (HA ≥ 2026.5), ISO 8601 with offset or `None` |
 | `schedule/{press,availability}` | Schedule button and gate |
 
 Devices `ylc:controller` (entities `youtube_live_control_*`) and `ylc:scheduling` (entities `youtube_live_scheduling_*`, `via_device` the former). Discovery under `homeassistant/<component>/<node>/<object>/config`.

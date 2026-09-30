@@ -25,10 +25,10 @@ func TestMessagesCoverEveryEntityOnBothDevices(t *testing.T) {
 	byID := messagesByObject(t)
 	controller := []string{
 		"broadcast", "title", "privacy", "thumbnail", "stage", "scheduled_start", "live", "encoder",
-		"go_live", "end_stream", "fast_mode", "fast_mode_remaining",
+		"go_live", "end_stream", "delete", "fast_mode", "fast_mode_remaining",
 		"broadcast_status", "stream_health", "channel", "authorization",
 	}
-	scheduling := []string{"preset", "start", "schedule"}
+	scheduling := []string{"preset", "start", "privacy", "schedule"}
 	for _, object := range controller {
 		m, ok := byID[NodeID+"_"+object]
 		if !ok {
@@ -78,6 +78,7 @@ func TestButtonsGateOnOwnAvailabilityTopic(t *testing.T) {
 	wantTopic := map[string]string{
 		NodeID + "_go_live":            GoLiveAvailability,
 		NodeID + "_end_stream":         EndAvailability,
+		NodeID + "_delete":             DeleteAvailability,
 		SchedulingNodeID + "_schedule": ScheduleAvailability,
 	}
 	for id, topic := range wantTopic {
