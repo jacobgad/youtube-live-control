@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.5.1
+
+- Web UI: one stylesheet for the whole site; consistent cards (status left, action right), one-word buttons, image gallery and picker tiles; connection page cut to the essentials; preset delete moved onto the preset's page; image names dropped (schema 3).
+
 ## 1.5.0
 
 - **Image library** (web UI → Images): upload thumbnails once and pick them on preset and broadcast forms; each image shows how many presets use it and can be deleted once unused. Duplicating a preset now shares its image instead of copying the file. Schema migration 2 moves existing 1.4.0 preset thumbnails into the library.

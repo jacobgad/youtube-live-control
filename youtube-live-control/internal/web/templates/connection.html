@@ -2,63 +2,43 @@
 {{with .Data}}
 {{if not .Configured}}
 <div class="card">
-<p><span class="badge warn">Not configured</span></p>
-<p>Set <code>google_client_id</code> and <code>google_client_secret</code> on the add-on's
-<strong>Configuration</strong> tab, then restart the add-on.</p>
+<div class="toolbar"><span class="badge warn">Not configured</span></div>
+<p>Set <code>google_client_id</code> and <code>google_client_secret</code> in the add-on options and restart.</p>
 <ol>
-<li>In <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer">Google Cloud Console</a>, create a project and enable the <strong>YouTube Data API v3</strong>.</li>
-<li>Configure the OAuth consent screen (type <em>External</em>; add the channel's Google account as a test user, then publish the app so the token stops expiring after 7 days).</li>
-<li>Create an <strong>OAuth client ID</strong> of type <strong>Desktop app</strong>. No redirect URI needs to be registered for this type.</li>
+<li>In <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer">Google Cloud Console</a>, enable the <strong>YouTube Data API v3</strong>.</li>
+<li>Configure the OAuth consent screen (External; add the channel's account as a test user).</li>
+<li>Create an OAuth client of type <strong>Desktop app</strong>.</li>
 </ol>
 </div>
 {{else}}
 <div class="card">
-{{if $.Authorized}}
-<p><span class="badge ok">Connected</span>{{if $.Channel}} to channel <strong>{{$.Channel}}</strong>{{end}} — the add-on manages this channel's live broadcasts.</p>
-<p class="hint">Wrong channel? Google's account chooser lists the channels (Brand Accounts) your account manages;
-connect again below and pick the channel, not the account. A channel shared with you only through
-YouTube Studio permissions cannot be chosen — its owner must add you as a Brand Account manager or connect themselves.</p>
-{{else}}
-<p><span class="badge warn">Not connected</span> — consent once and the refresh token is kept in <code>/data</code>.</p>
-{{end}}
+<div class="toolbar">
+<div>
+{{if $.Authorized}}<span class="badge ok">Connected</span>{{if $.Channel}} <strong>{{$.Channel}}</strong>{{end}}{{else}}<span class="badge warn">Not connected</span>{{end}}
+</div>
+<a class="button primary" href="{{.AuthURL}}" target="_blank" rel="noreferrer">Connect</a>
+</div>
+<p class="hint">Sign in and pick the <em>channel</em> on Google's chooser, then allow <em>Manage your YouTube account</em>.{{if $.Authorized}} Connecting again switches channel.{{end}}</p>
 </div>
 
 {{if .External}}
-<h2>1 · Register the redirect URI</h2>
 <div class="card">
-<p>Your OAuth client must be of type <strong>Web application</strong> with this exact <strong>authorized redirect URI</strong>
-(Google requires https for anything other than localhost):</p>
-<p><code>{{.RedirectURI}}</code></p>
+<div class="field">
+<label>Authorized redirect URI</label>
+<code>{{.RedirectURI}}</code>
+<p class="hint">Register this on a <strong>Web application</strong> OAuth client. The redirect then completes on its own.</p>
 </div>
-<h2>2 · Consent</h2>
-<div class="card">
-<p><a class="button primary" href="{{.AuthURL}}" target="_blank" rel="noreferrer">Connect Google account</a></p>
-<p>Pick the channel on Google's chooser and allow <em>Manage your YouTube account</em>. Google redirects back
-through your proxy and the connection completes on its own.</p>
-<p>If the redirect page fails to load, the consent still succeeded — paste the full URL from the address bar:</p>
-{{else}}
-<h2>1 · Consent</h2>
-<div class="card">
-<p>Use an OAuth client of type <strong>Desktop app</strong> — Google allows its <code>localhost</code> redirect
-without registration. <span class="muted">(Redirect URI in use: <code>{{.RedirectURI}}</code>.)</span></p>
-<p><a class="button primary" href="{{.AuthURL}}" target="_blank" rel="noreferrer">Connect Google account</a></p>
-<p>Pick the channel on Google's chooser and allow <em>Manage your YouTube account</em>.</p>
 </div>
-<h2>2 · Paste the result</h2>
-<div class="card">
-<p>After consenting, Google sends the browser to <code>localhost</code>, which shows a "can't connect" page
-unless this browser is running on the Home Assistant machine. <strong>That is expected</strong> — the
-consent succeeded and the code is in that tab's address bar. Copy the whole URL and paste it here:</p>
 {{end}}
+<div class="card">
 <form method="post" action="{{$.Base}}/manual" class="row end">
 <div class="field">
 <label for="response">Redirect URL</label>
-<input type="text" id="response" name="response" placeholder="http://localhost:8098/oauth/callback?state=…&code=…" autocomplete="off">
+<input type="text" id="response" name="response" placeholder="{{.RedirectURI}}?state=…&code=…" autocomplete="off">
 </div>
-<button type="submit" class="primary">Finish connection</button>
+<button type="submit" class="primary">Finish</button>
 </form>
-<p class="hint">Have a public https hostname that forwards to this add-on's port 8098? Set the <code>external_url</code>
-option and the redirect completes automatically instead.</p>
+<p class="hint">{{if .External}}If the redirect page fails to load, paste its address here.{{else}}After consenting, Google sends the browser to <code>localhost</code>, which fails to load unless it runs on the Home Assistant machine. Paste that page's address here.{{end}}</p>
 </div>
 {{end}}
 {{end}}

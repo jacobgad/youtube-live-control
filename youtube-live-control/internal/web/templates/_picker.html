@@ -1,17 +1,13 @@
 {{define "picker"}}
 <div class="picker">
-{{if .Keep}}
-<label class="tile"><input type="radio" name="image_id" value="" {{if not .Selected}}checked{{end}}><span class="tile-body muted">Keep current</span></label>
-{{else}}
-<label class="tile"><input type="radio" name="image_id" value="" {{if not .Selected}}checked{{end}}><span class="tile-body muted">No thumbnail</span></label>
-{{end}}
+<label class="tile" aria-label="{{if .Keep}}Keep current thumbnail{{else}}No thumbnail{{end}}"><input type="radio" name="image_id" value="" {{if not .Selected}}checked{{end}}>{{if .KeepURL}}<img src="{{.KeepURL}}" alt="Current thumbnail">{{else}}<span class="tile-body">{{if .Keep}}Keep current{{else}}No thumbnail{{end}}</span>{{end}}</label>
 {{range .Images}}
-<label class="tile"><input type="radio" name="image_id" value="{{.ID}}" {{if eq .ID $.Selected}}checked{{end}}><img src="{{$.Base}}/images/{{.ID}}" alt=""><span class="tile-body">{{.Name}}</span></label>
+<label class="tile" aria-label="Library image"><input type="radio" name="image_id" value="{{.ID}}" {{if eq .ID $.Selected}}checked{{end}}><img src="{{$.Base}}/images/{{.ID}}" alt="Library image"></label>
 {{end}}
 </div>
 <div class="field">
-<label for="thumbnail">…or upload a new image</label>
+<label for="thumbnail">Upload</label>
 <input type="file" id="thumbnail" name="thumbnail" accept="image/jpeg,image/png">
-<p class="hint">JPEG or PNG, up to 2 MB, ideally 1280×720. An upload is used instead of the choice above and is added to the library.</p>
+<p class="hint">JPEG or PNG up to 2 MB. An upload replaces the choice above and joins the library.</p>
 </div>
 {{end}}

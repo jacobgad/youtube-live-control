@@ -2,6 +2,7 @@
 package web
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"errors"
@@ -36,6 +37,13 @@ const (
 
 //go:embed templates/*.html
 var templateFS embed.FS
+
+//go:embed static/app.css
+var stylesheet []byte
+
+// The embedded stylesheet cannot change while the process runs, so start time is an
+// honest Last-Modified for conditional requests.
+var startedAt = time.Now()
 
 // Server is the ingress UI and the OAuth callback listener.
 type Server struct {
@@ -88,8 +96,8 @@ func parsePages() map[string]*template.Template {
 		"weekdays": func() []time.Weekday {
 			return []time.Weekday{time.Sunday, time.Monday, time.Tuesday, time.Wednesday, time.Thursday, time.Friday, time.Saturday}
 		},
-		"picker": func(base string, images []store.Image, selected string, keep bool) pickerData {
-			return pickerData{Base: base, Images: images, Selected: selected, Keep: keep}
+		"picker": func(base string, images []store.Image, selected string, keep bool, keepURL string) pickerData {
+			return pickerData{Base: base, Images: images, Selected: selected, Keep: keep, KeepURL: keepURL}
 		},
 		"kb": func(size int64) string { return strconv.FormatInt((size+1023)/1024, 10) + " KB" },
 		"keySuffix": func(key string) string {
@@ -112,6 +120,7 @@ func parsePages() map[string]*template.Template {
 func (s *Server) Run(ctx context.Context) error {
 	ingressMux := http.NewServeMux()
 	ingressMux.HandleFunc("GET /{$}", s.handleHome)
+	ingressMux.HandleFunc("GET /static/app.css", handleStylesheet)
 	ingressMux.HandleFunc("GET /connection", s.handleConnection)
 	ingressMux.HandleFunc("POST /manual", s.handleManual)
 	ingressMux.HandleFunc("GET /broadcasts", s.requireAuth(s.handleBroadcasts))
@@ -189,12 +198,12 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// Keep is offered only when editing a broadcast, whose YouTube thumbnail may stay as is.
 type pickerData struct {
 	Base     string
 	Images   []store.Image
 	Selected string
 	Keep     bool
+	KeepURL  string
 }
 
 type page struct {
@@ -231,6 +240,11 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name, title stri
 
 func requestContext(r *http.Request) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(r.Context(), requestTimeout)
+}
+
+func handleStylesheet(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	http.ServeContent(w, r, "app.css", startedAt, bytes.NewReader(stylesheet))
 }
 
 func (s *Server) handleHome(w http.ResponseWriter, r *http.Request) {

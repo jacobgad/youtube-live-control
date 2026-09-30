@@ -112,7 +112,7 @@ func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleManual(w http.ResponseWriter, r *http.Request) {
 	raw := strings.TrimSpace(r.FormValue("response"))
 	if raw == "" {
-		s.renderConnection(w, r, "Paste the full URL from the browser's address bar after consenting.")
+		s.renderConnection(w, r, "Paste the address of the page Google sent you to.")
 		return
 	}
 	code, state := raw, ""
@@ -124,7 +124,7 @@ func (s *Server) handleManual(w http.ResponseWriter, r *http.Request) {
 	if state != "" {
 		entry, ok := s.takeState(state)
 		if !ok {
-			s.renderConnection(w, r, "That sign-in attempt has expired. Use the Connect link again, then paste the new URL.")
+			s.renderConnection(w, r, "That sign-in attempt has expired. Press Connect again, then paste the new address.")
 			return
 		}
 		redirectURI = entry.redirectURI
@@ -136,7 +136,7 @@ func (s *Server) handleManual(w http.ResponseWriter, r *http.Request) {
 		s.renderConnection(w, r, "Token exchange failed: "+err.Error())
 		return
 	}
-	s.redirect(w, r, "/broadcasts", "notice", "Connected. The entities in Home Assistant are now live.")
+	s.redirect(w, r, "/broadcasts", "notice", "Connected.")
 }
 
 func writeResult(w http.ResponseWriter, status int, text string) {

@@ -30,7 +30,7 @@ func sample() preset.Preset {
 func TestPresetRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	s := open(t)
-	img, err := s.AddImage(ctx, "cover.png", "image/png", []byte("png"))
+	img, err := s.AddImage(ctx, "image/png", []byte("png"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestPresetRoundTrip(t *testing.T) {
 func TestImageLibrary(t *testing.T) {
 	ctx := context.Background()
 	s := open(t)
-	img, err := s.AddImage(ctx, "Easter", "image/jpeg", []byte("jpg"))
+	img, err := s.AddImage(ctx, "image/jpeg", []byte("jpg"))
 	if err != nil || img.File != img.ID+".jpg" || img.Size != 3 || img.UsedBy != 0 {
 		t.Fatalf("AddImage = %+v %v", img, err)
 	}
@@ -176,7 +176,7 @@ func TestMigrationFromSchemaOneCarriesThumbnailsIntoTheLibrary(t *testing.T) {
 		t.Fatalf("migrated image = %q %q %v", data, ct, err)
 	}
 	list, _ := s.ListImages(ctx)
-	if len(list) != 1 || list[0].UsedBy != 1 || list[0].Name != "Sunday thumbnail" {
+	if len(list) != 1 || list[0].UsedBy != 1 {
 		t.Fatalf("library after migration = %+v", list)
 	}
 	var version int

@@ -1,34 +1,28 @@
 {{define "content"}}
 {{with .Data}}
-<p class="hint">Thumbnails presets and broadcasts can use. An image can be deleted once no preset references it.</p>
 <div class="card">
 <form method="post" action="{{$.Base}}/images" enctype="multipart/form-data" class="row end">
 <div class="field">
-<label for="thumbnail">Add an image</label>
+<label for="thumbnail">Upload</label>
 <input type="file" id="thumbnail" name="thumbnail" accept="image/jpeg,image/png" required>
-</div>
-<div class="field">
-<label for="image_name">Name (optional)</label>
-<input type="text" id="image_name" name="image_name" placeholder="Sunday service" maxlength="80">
 </div>
 <button type="submit" class="primary">Upload</button>
 </form>
-<p class="hint">JPEG or PNG, up to 2 MB, ideally 1280×720.</p>
+<p class="hint">JPEG or PNG up to 2 MB, ideally 1280×720.</p>
 </div>
 {{if not .Images}}<div class="card muted">No images yet.</div>{{end}}
+<div class="gallery">
 {{range .Images}}
-<div class="card item">
-<img class="thumb" src="{{$.Base}}/images/{{.ID}}" alt="">
-<div>
-<div><strong>{{.Name}}</strong></div>
-<div class="meta">{{kb .Size}} · {{if eq .UsedBy 0}}not used{{else if eq .UsedBy 1}}used by 1 preset{{else}}used by {{.UsedBy}} presets{{end}}</div>
-</div>
-<div class="side">
-<form class="inline" method="post" action="{{$.Base}}/images/{{.ID}}/delete" onsubmit="return confirm('Delete image “{{.Name}}”?');">
-<button type="submit" class="danger" {{if gt .UsedBy 0}}disabled title="Used by a preset"{{end}}>Delete</button>
+<div class="card gallery-item">
+<img src="{{$.Base}}/images/{{.ID}}" alt="">
+<div class="gallery-meta">
+<span class="muted">{{kb .Size}} · {{if eq .UsedBy 0}}not used{{else if eq .UsedBy 1}}1 preset{{else}}{{.UsedBy}} presets{{end}}</span>
+<form class="inline" method="post" action="{{$.Base}}/images/{{.ID}}/delete" onsubmit="return confirm('Delete this image?');">
+<button type="submit" class="danger small" {{if gt .UsedBy 0}}disabled title="Used by a preset"{{end}}>Delete</button>
 </form>
 </div>
 </div>
 {{end}}
+</div>
 {{end}}
 {{end}}

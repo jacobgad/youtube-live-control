@@ -22,7 +22,7 @@ Runs a channel's scheduled YouTube live streams from Home Assistant.
 ### 2. Connect
 
 1. Start the add-on and open its web UI (**Open Web UI** on the add-on page, or **YouTube Live** in the sidebar).
-2. Press **Connect Google account**. If the account manages several channels, Google shows a chooser — **pick the channel**, not the account. Only that channel's broadcasts are visible to the add-on.
+2. Press **Connect**. If the account manages several channels, Google shows a chooser — **pick the channel**, not the account. Only that channel's broadcasts are visible to the add-on.
 3. Consent to *Manage your YouTube account*. Google then sends the browser to `http://localhost:8098/…`, which fails to load unless the browser runs on the Home Assistant machine — expected. Copy the full URL from the address bar and paste it into the form on the web UI.
 
 The web UI header shows the connected channel; the **Channel** sensor shows the same.
@@ -33,7 +33,7 @@ If you have a public **https** hostname forwarding to the add-on's port 8098, se
 
 ### 3. Presets
 
-Web UI → **Presets → New preset**. A preset is everything a regular service needs:
+Web UI → **Presets → Create**. A preset is everything a regular service needs:
 
 | Field | Meaning |
 | --- | --- |
@@ -77,8 +77,8 @@ Pick a **Preset** — **Date** and **Time** jump to its next free usual slot —
 | Tab | Purpose |
 | --- | --- |
 | Broadcasts | schedule from a preset with a full form (any date, off-pattern services); edit title, description, date and time, privacy, stream key, thumbnail; delete. *Never started* lists broadcasts scheduled more than a day ago that never went live — hidden from the panel — for cleanup. |
-| Presets | create, edit, duplicate, delete |
-| Images | the thumbnail library: upload once, reuse anywhere; delete when no preset uses it |
+| Presets | create, edit, duplicate; delete from a preset's page |
+| Images | the thumbnail library: upload once, pick anywhere; delete once no preset uses it |
 | Connection | Google account and channel |
 
 The web UI is for Home Assistant admins only.

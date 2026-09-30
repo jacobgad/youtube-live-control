@@ -124,7 +124,7 @@ func (s *Server) handleDuplicatePreset(w http.ResponseWriter, r *http.Request) {
 	}
 	s.log.Info("preset_duplicated", "from", r.PathValue("id"), "id", copied.ID)
 	s.ctrl.PresetsChanged(ctx)
-	s.redirect(w, r, "/presets/"+copied.ID, "notice", "Duplicated as “"+copied.Name+"” — rename it and adjust what differs.")
+	s.redirect(w, r, "/presets/"+copied.ID, "notice", "Duplicated as “"+copied.Name+"”.")
 }
 
 // An upload joins the library and wins over the radio choice.
@@ -136,17 +136,11 @@ func (s *Server) pickedImage(ctx context.Context, r *http.Request, chosen string
 	if data == nil {
 		return chosen, nil
 	}
-	name := r.FormValue("image_name")
-	if name == "" {
-		if _, header, err := r.FormFile("thumbnail"); err == nil {
-			name = header.Filename
-		}
-	}
-	img, err := s.store.AddImage(ctx, name, contentType, data)
+	img, err := s.store.AddImage(ctx, contentType, data)
 	if err != nil {
 		return "", err
 	}
-	s.log.Info("image_added", "id", img.ID, "name", img.Name, "size", img.Size)
+	s.log.Info("image_added", "id", img.ID, "size", img.Size)
 	return img.ID, nil
 }
 
@@ -176,19 +170,13 @@ func (s *Server) handleUploadImage(w http.ResponseWriter, r *http.Request) {
 		s.redirect(w, r, "/images", "error", err.Error())
 		return
 	}
-	name := r.FormValue("image_name")
-	if name == "" {
-		if _, header, err := r.FormFile("thumbnail"); err == nil {
-			name = header.Filename
-		}
-	}
-	img, err := s.store.AddImage(ctx, name, contentType, data)
+	img, err := s.store.AddImage(ctx, contentType, data)
 	if err != nil {
 		s.redirect(w, r, "/images", "error", "Could not store the image: "+err.Error())
 		return
 	}
-	s.log.Info("image_added", "id", img.ID, "name", img.Name, "size", img.Size)
-	s.redirect(w, r, "/images", "notice", "Added “"+img.Name+"”.")
+	s.log.Info("image_added", "id", img.ID, "size", img.Size)
+	s.redirect(w, r, "/images", "notice", "Image added.")
 }
 
 func (s *Server) handleDeleteImage(w http.ResponseWriter, r *http.Request) {

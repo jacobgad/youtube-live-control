@@ -3,19 +3,19 @@
 <div class="card">
 <form method="get" action="{{$.Base}}/broadcasts/new" class="row end">
 <div class="field">
-<label for="preset">Schedule a new stream from a preset</label>
+<label for="preset">Preset</label>
 <select id="preset" name="preset" required>
 <option value="">Choose a preset…</option>
 {{range .Presets}}<option value="{{.ID}}">{{.Name}}</option>{{end}}
 </select>
 </div>
-<button type="submit" class="primary" {{if not .Presets}}disabled{{end}}>Next</button>
+<button type="submit" class="primary" {{if not .Presets}}disabled{{end}}>Schedule</button>
 </form>
-{{if not .Presets}}<p class="hint">No presets yet — <a href="{{$.Base}}/presets/new">create one</a> with the title pattern, description, privacy, stream key and thumbnail your services use.</p>{{end}}
+{{if not .Presets}}<p class="hint">No presets yet — <a href="{{$.Base}}/presets/new">create one</a> first.</p>{{end}}
 </div>
 
 <h2>Upcoming</h2>
-{{if not .Listing.Broadcasts}}<div class="card muted">Nothing scheduled on this channel.</div>{{end}}
+{{if not .Listing.Broadcasts}}<div class="card muted">Nothing scheduled.</div>{{end}}
 {{range .Listing.Broadcasts}}
 <div class="card item {{if not .ThumbnailURL}}no-thumb{{end}}">
 {{if .ThumbnailURL}}<img class="thumb" src="{{.ThumbnailURL}}" alt="">{{end}}
@@ -32,7 +32,6 @@
 
 {{if .Listing.Stale}}
 <h2>Never started</h2>
-<p class="hint">Scheduled more than a day ago and never went live. Hidden from the Home Assistant panel.</p>
 {{range .Listing.Stale}}
 <div class="card item no-thumb stale">
 <div>

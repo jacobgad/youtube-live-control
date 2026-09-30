@@ -2,11 +2,9 @@
 {{with .Data}}
 <div class="card">
 <form method="post" action="{{$.Base}}/broadcasts/{{if .ID}}{{.ID}}{{else}}new{{end}}" enctype="multipart/form-data">
-<input type="hidden" name="preset_id" value="{{.PresetID}}">
-{{if .Lifecycle}}<p><span class="badge">{{.Lifecycle}}</span></p>{{end}}
 
 <div class="field">
-<label for="title">Title</label>
+<label for="title">Title{{if .Lifecycle}} <span class="badge">{{.Lifecycle}}</span>{{end}}</label>
 <input type="text" id="title" name="title" value="{{.Title}}" maxlength="100" required>
 </div>
 
@@ -19,7 +17,6 @@
 <div class="field">
 <label for="start">Scheduled start</label>
 <input type="datetime-local" id="start" name="start" value="{{inputTime .Start}}" required>
-<p class="hint">&nbsp;</p>
 </div>
 <div class="field">
 <label for="privacy">Privacy</label>
@@ -28,7 +25,6 @@
 <option value="unlisted" {{if eq .Privacy "unlisted"}}selected{{end}}>Unlisted</option>
 <option value="private" {{if eq .Privacy "private"}}selected{{end}}>Private</option>
 </select>
-<p class="hint">&nbsp;</p>
 </div>
 </div>
 
@@ -38,15 +34,15 @@
 {{if .ID}}<option value="" {{if not .StreamID}}selected{{end}}>{{if .StreamID}}Keep current{{else}}— none bound —{{end}}</option>{{end}}
 {{range .Streams}}<option value="{{.ID}}" {{if eq .ID $.Data.StreamID}}selected{{end}}>{{.Title}} · {{.Resolution}}{{if .FrameRate}} {{.FrameRate}}{{end}} · key {{keySuffix .StreamKey}}</option>{{end}}
 </select>
-<p class="hint">The stream key OBS is configured with. A broadcast without one can never go live.</p>
+<p class="hint">The key OBS streams to. Without one the broadcast can never go live.</p>
 </div>
 
 <div class="field">
 <label>Thumbnail</label>
-{{if .ThumbnailURL}}<img class="thumb large" src="{{.ThumbnailURL}}" alt="Current thumbnail">{{end}}
+{{template "picker" (picker $.Base .Images .ImageID (ne .ID "") .ThumbnailURL)}}
 </div>
-{{template "picker" (picker $.Base .Images .ImageID (ne .ID ""))}}
 
+<input type="hidden" name="preset_id" value="{{.PresetID}}">
 <div class="actions">
 <button type="submit" class="primary">{{if .ID}}Save{{else}}Schedule{{end}}</button>
 <a class="button quiet" href="{{$.Base}}/broadcasts">Cancel</a>

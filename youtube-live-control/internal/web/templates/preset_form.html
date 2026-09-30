@@ -2,6 +2,7 @@
 {{with .Data}}
 <div class="card">
 <form method="post" action="{{$.Base}}/presets/{{if .IsNew}}new{{else}}{{.Preset.ID}}{{end}}" enctype="multipart/form-data">
+
 <div class="field">
 <label for="name">Preset name</label>
 <input type="text" id="name" name="name" value="{{.Preset.Name}}" placeholder="Sunday morning" required>
@@ -24,12 +25,10 @@
 <select id="weekday" name="weekday">
 {{range weekdays}}<option value="{{printf "%d" .}}" {{if eq . $.Data.Preset.Weekday}}selected{{end}}>{{.}}</option>{{end}}
 </select>
-<p class="hint">&nbsp;</p>
 </div>
 <div class="field">
 <label for="time_of_day">Usual time</label>
 <input type="time" id="time_of_day" name="time_of_day" value="{{.Preset.TimeOfDay}}" required>
-<p class="hint">&nbsp;</p>
 </div>
 <div class="field">
 <label for="privacy">Privacy</label>
@@ -38,30 +37,35 @@
 <option value="unlisted" {{if eq .Preset.Privacy "unlisted"}}selected{{end}}>Unlisted</option>
 <option value="private" {{if eq .Preset.Privacy "private"}}selected{{end}}>Private</option>
 </select>
-<p class="hint">&nbsp;</p>
 </div>
 </div>
 
 <div class="field">
 <label for="stream_id">Stream key</label>
 <select id="stream_id" name="stream_id" required>
-<option value="">Choose the stream key OBS uses…</option>
+<option value="">Choose the key OBS streams to…</option>
 {{range .Streams}}<option value="{{.ID}}" {{if eq .ID $.Data.Preset.StreamID}}selected{{end}}>{{.Title}} · {{.Resolution}}{{if .FrameRate}} {{.FrameRate}}{{end}} · key {{keySuffix .StreamKey}}</option>{{end}}
 </select>
-{{if not .Streams}}<p class="hint">No stream keys found on this channel. Create one in YouTube Studio → Go live → Stream settings, then reload.</p>{{end}}
+{{if not .Streams}}<p class="hint">No stream keys on this channel. Create one in YouTube Studio → Go live → Stream settings, then reload.</p>{{end}}
 </div>
 
 <div class="field">
 <label>Thumbnail</label>
-<p class="hint">Uploaded to every broadcast scheduled from this preset.</p>
+{{template "picker" (picker $.Base .Images .Preset.ImageID false "")}}
 </div>
-{{template "picker" (picker $.Base .Images .Preset.ImageID false)}}
 
 <div class="actions">
-<button type="submit" class="primary">Save preset</button>
+<button type="submit" class="primary">Save</button>
 <a class="button quiet" href="{{$.Base}}/presets">Cancel</a>
+{{if not .IsNew}}
+<span class="spacer"></span>
+<button type="submit" class="danger" form="delete-{{.Preset.ID}}">Delete</button>
+{{end}}
 </div>
 </form>
+{{if not .IsNew}}
+<form id="delete-{{.Preset.ID}}" method="post" action="{{$.Base}}/presets/{{.Preset.ID}}/delete" onsubmit="return confirm('Delete preset “{{.Preset.Name}}”? Broadcasts already scheduled from it are not affected.');"></form>
+{{end}}
 </div>
 {{end}}
 {{end}}

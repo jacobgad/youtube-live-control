@@ -23,7 +23,7 @@ func TestRenderPagesToDisk(t *testing.T) {
 	next := youtube.Broadcast{ID: "b2", Title: "Sunday Service – 12 Jan 2025", ScheduledStart: start.AddDate(0, 0, 7), PrivacyStatus: "unlisted", LifeCycleStatus: youtube.LifeReady}
 	stale := youtube.Broadcast{ID: "b0", Title: "Christmas Eve", ScheduledStart: start.AddDate(0, 0, -14), LifeCycleStatus: youtube.LifeReady}
 	streams := []youtube.Stream{{ID: "s1", Title: "OBS main", StreamKey: "abcd-efgh-ijkl-mnop", Resolution: "1080p", FrameRate: "30fps"}}
-	library := []store.Image{{ID: "0123456789ab", File: "0123456789ab.jpg", Name: "Sunday", Size: 204800, UsedBy: 1}, {ID: "ba9876543210", File: "ba9876543210.png", Name: "Easter", Size: 51200}}
+	library := []store.Image{{ID: "0123456789ab", File: "0123456789ab.jpg", Size: 204800, UsedBy: 1}, {ID: "ba9876543210", File: "ba9876543210.png", Size: 51200}}
 	p := preset.Preset{ID: "abc123", Name: "Sunday morning", TitleTemplate: "Sunday Service – {date}", Description: "Join us", Privacy: "public", StreamID: "s1", Weekday: time.Sunday, TimeOfDay: "09:30", ImageID: "0123456789ab"}
 	listing := controller.Listing{Broadcasts: []youtube.Broadcast{live, next}, Stale: []youtube.Broadcast{stale}, SelectedID: "b1", Channel: "St Mary's", Authorized: true}
 	cases := map[string]any{
@@ -39,7 +39,7 @@ func TestRenderPagesToDisk(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := pages[name].ExecuteTemplate(f, "layout.html", page{Base: "", Title: name, Tab: name, Channel: "St Mary's", Authorized: true, Notice: "Saved “Sunday Service”.", Data: data}); err != nil {
+		if err := pages[name].ExecuteTemplate(f, "layout.html", page{Base: ".", Title: name, Tab: name, Channel: "St Mary's", Authorized: true, Data: data}); err != nil {
 			t.Fatal(err)
 		}
 		f.Close()

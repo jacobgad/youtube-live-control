@@ -1,22 +1,20 @@
 {{define "content"}}
 {{with .Data}}
-<p class="hint">A preset is everything a regular service needs — title pattern, description, privacy, stream key, thumbnail, usual day and time — so scheduling is "pick preset, confirm date".</p>
-<p><a class="button primary" href="{{$.Base}}/presets/new">New preset</a></p>
+<div class="toolbar">
+<h2>Presets</h2>
+<a class="button primary" href="{{$.Base}}/presets/new">Create</a>
+</div>
 {{if not .Presets}}<div class="card muted">No presets yet.</div>{{end}}
 {{range .Presets}}
 <div class="card item {{if not .ImageID}}no-thumb{{end}}">
 {{if .ImageID}}<img class="thumb" src="{{$.Base}}/images/{{.ImageID}}" alt="">{{end}}
 <div>
 <div><strong><a href="{{$.Base}}/presets/{{.ID}}">{{.Name}}</a></strong></div>
-<div class="meta">{{.TitleTemplate}} · {{.Weekday}} {{.TimeOfDay}} · {{.Privacy}}
-{{with index $.Data.Streams .StreamID}} · {{.Title}}{{else}} · <span class="badge warn">stream key missing</span>{{end}}</div>
+<div class="meta">{{.TitleTemplate}} · {{.Weekday}} {{.TimeOfDay}} · {{.Privacy}}{{with index $.Data.Streams .StreamID}} · {{.Title}}{{else}} · <span class="badge warn">stream key missing</span>{{end}}</div>
 </div>
 <div class="side">
 <form class="inline" method="post" action="{{$.Base}}/presets/{{.ID}}/duplicate">
 <button type="submit" class="quiet">Duplicate</button>
-</form>
-<form class="inline" method="post" action="{{$.Base}}/presets/{{.ID}}/delete" onsubmit="return confirm('Delete preset “{{.Name}}”?');">
-<button type="submit" class="danger">Delete</button>
 </form>
 </div>
 </div>

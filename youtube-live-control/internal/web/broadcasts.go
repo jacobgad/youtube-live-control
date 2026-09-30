@@ -87,7 +87,7 @@ func (s *Server) handleNewBroadcast(w http.ResponseWriter, r *http.Request) {
 		s.render(w, r, "broadcast_form", "New broadcast", form, err.Error())
 		return
 	}
-	s.redirect(w, r, "/broadcasts", "notice", "Scheduled “"+created.Title+"” for "+created.ScheduledStart.Local().Format("Mon 2 Jan 15:04")+".")
+	s.redirect(w, r, "/broadcasts", "notice", "Scheduled “"+created.Title+"”.")
 }
 
 func (s *Server) handleEditBroadcastForm(w http.ResponseWriter, r *http.Request) {

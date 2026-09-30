@@ -31,7 +31,7 @@ var ErrImageInUse = errors.New("image is used by a preset")
 // ErrImageNotFound is returned for an unknown image id.
 var ErrImageNotFound = errors.New("image not found")
 
-const schemaVersion = 2
+const schemaVersion = 3
 
 var migrations = []string{
 	`CREATE TABLE presets (
@@ -65,13 +65,13 @@ var migrations = []string{
 	UPDATE presets SET image_id = (SELECT id FROM images WHERE images.file = presets.thumbnail_file)
 		WHERE thumbnail_file != '';
 	ALTER TABLE presets DROP COLUMN thumbnail_file`,
+	`ALTER TABLE images DROP COLUMN name`,
 }
 
 // Image is one library entry.
 type Image struct {
 	ID        string
 	File      string
-	Name      string
 	Size      int64
 	UsedBy    int
 	CreatedAt time.Time
@@ -273,12 +273,12 @@ func (s *Store) DeletePreset(ctx context.Context, id string) error {
 	return nil
 }
 
-const imageColumns = "i.id, i.file, i.name, i.size, i.created_at, (SELECT count(*) FROM presets p WHERE p.image_id = i.id)"
+const imageColumns = "i.id, i.file, i.size, i.created_at, (SELECT count(*) FROM presets p WHERE p.image_id = i.id)"
 
 func scanImage(row interface{ Scan(...any) error }) (Image, error) {
 	var img Image
 	var created int64
-	err := row.Scan(&img.ID, &img.File, &img.Name, &img.Size, &created, &img.UsedBy)
+	err := row.Scan(&img.ID, &img.File, &img.Size, &created, &img.UsedBy)
 	img.CreatedAt = time.Unix(created, 0)
 	return img, err
 }
@@ -314,16 +314,13 @@ func (s *Store) GetImage(ctx context.Context, id string) (Image, error) {
 }
 
 // AddImage stores an image; the file lands before the row so a failed insert dangles nothing.
-func (s *Store) AddImage(ctx context.Context, name, imageContentType string, data []byte) (Image, error) {
+func (s *Store) AddImage(ctx context.Context, imageContentType string, data []byte) (Image, error) {
 	id := newID()
 	file := id + extensionFor(imageContentType)
 	if err := atomicfile.Write(s.imagePath(file), data, 0o600); err != nil {
 		return Image{}, err
 	}
-	if strings.TrimSpace(name) == "" {
-		name = file
-	}
-	_, err := s.db.ExecContext(ctx, "INSERT INTO images (id, file, name, size, created_at) VALUES (?, ?, ?, ?, ?)", id, file, name, len(data), s.now().Unix())
+	_, err := s.db.ExecContext(ctx, "INSERT INTO images (id, file, size, created_at) VALUES (?, ?, ?, ?)", id, file, len(data), s.now().Unix())
 	if err != nil {
 		_ = os.Remove(s.imagePath(file))
 		return Image{}, err
