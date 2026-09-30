@@ -430,11 +430,10 @@ func (c *Client) MyChannel(ctx context.Context) (Channel, error) {
 	return Channel{ID: out.Items[0].ID, Title: out.Items[0].Snippet.Title, Country: out.Items[0].Snippet.Country}, nil
 }
 
-// Category ids are global; only the assignable set varies by region, so a channel
-// without a country gets the US list rather than none.
 const fallbackRegion = "US"
 
-// ListCategories lists the assignable video categories for a country. Costs 1 quota unit.
+// ListCategories lists the video categories for a region as the API returns them; the
+// assignable flag is ignored because it contradicts Studio for some regions. Costs 1 quota unit.
 func (c *Client) ListCategories(ctx context.Context, regionCode string) ([]Category, error) {
 	if regionCode == "" {
 		regionCode = fallbackRegion
@@ -443,8 +442,7 @@ func (c *Client) ListCategories(ctx context.Context, regionCode string) ([]Categ
 		Items []struct {
 			ID      string `json:"id"`
 			Snippet struct {
-				Title      string `json:"title"`
-				Assignable bool   `json:"assignable"`
+				Title string `json:"title"`
 			} `json:"snippet"`
 		} `json:"items"`
 	}
@@ -454,9 +452,7 @@ func (c *Client) ListCategories(ctx context.Context, regionCode string) ([]Categ
 	}
 	categories := make([]Category, 0, len(out.Items))
 	for _, item := range out.Items {
-		if item.Snippet.Assignable {
-			categories = append(categories, Category{ID: item.ID, Title: item.Snippet.Title})
-		}
+		categories = append(categories, Category{ID: item.ID, Title: item.Snippet.Title})
 	}
 	return categories, nil
 }

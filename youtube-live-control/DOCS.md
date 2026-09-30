@@ -42,7 +42,7 @@ Web UI → **Presets → Create**. A preset is everything a regular service need
 | Description | copied to each broadcast |
 | Usual day and time | pre-fills Date and Time with the next occurrence that isn't already scheduled |
 | Privacy | public / unlisted / private |
-| Category | YouTube video category, from the channel's country (US list if the channel has none); *YouTube default* leaves it to YouTube |
+| Category | YouTube video category, as listed by the API for the channel's country; *YouTube default* leaves it to YouTube |
 | Stream key | the channel's stream key OBS is configured with; a broadcast without one can never go live |
 | Thumbnail | from the **Images** library or uploaded here |
 

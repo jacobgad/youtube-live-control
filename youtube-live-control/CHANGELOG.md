@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.1
+
+- Category list no longer filters on the API's `assignable` flag, which wrongly hid *Nonprofits & Activism* for some regions; every category the API returns for the channel's country is offered.
+
 ## 1.6.0
 
 **Options renamed — re-enter them after updating.** Five polling knobs become four, all in seconds: **Idle refresh** (`refresh_idle_seconds`, drives the broadcast list and the idle status check), **Live refresh** (`refresh_live_seconds`), **Fast refresh** (`refresh_fast_seconds`) and **Fast refresh duration** (`fast_refresh_duration_seconds`). `external_url` is now **OAuth redirect base URL** (`oauth_redirect_base_url`). Every option has a name and description on the Configuration tab.
