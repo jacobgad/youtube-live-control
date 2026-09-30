@@ -89,7 +89,6 @@ func dayOf(t time.Time) time.Time {
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
 }
 
-// start combines the chosen day and time-of-day in local time; zero while either is unset.
 func (sc *scheduling) start() time.Time {
 	if sc.date.IsZero() || !sc.timeSet {
 		return time.Time{}

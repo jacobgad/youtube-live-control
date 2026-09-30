@@ -17,7 +17,7 @@ const (
 	apiBase    = "https://www.googleapis.com/youtube/v3"
 	uploadBase = "https://www.googleapis.com/upload/youtube/v3"
 
-	// MaxThumbnailBytes is YouTube's thumbnail upload limit.
+	// MaxThumbnailBytes is YouTube's upload limit.
 	MaxThumbnailBytes = 2 << 20
 )
 
@@ -34,7 +34,7 @@ func ValidPrivacy(p string) bool {
 	return false
 }
 
-// Broadcast lifecycle and stream status values as reported by the API.
+// Lifecycle, stream status and transition values as the API spells them.
 const (
 	LifeCreated      = "created"
 	LifeReady        = "ready"
@@ -77,16 +77,15 @@ type Stream struct {
 	Status     string
 }
 
-// rawParts is the resource exactly as YouTube returned it. An update PUT overwrites
-// every mutable field of each part sent, so the echo is what keeps DVR, latency,
-// embed and caption settings intact when only the title changes.
+// An update PUT overwrites every mutable field of each part sent; echoing the fetched
+// parts is what keeps DVR, latency, embed and caption settings intact.
 type rawParts struct {
 	Snippet        map[string]any
 	Status         map[string]any
 	ContentDetails map[string]any
 }
 
-// StreamStatus is the bound liveStream's ingestion state.
+// StreamStatus is a liveStream's ingestion state.
 type StreamStatus struct {
 	Status string // created, ready, active, inactive, error
 	Health string // good, ok, bad, noData; only meaningful while active
@@ -109,13 +108,13 @@ func HasReason(err error, reason string) bool {
 	return errors.As(err, &apiErr) && apiErr.Reason == reason
 }
 
-// Client calls the YouTube Data API v3 with tokens minted by Auth.
+// Client calls the YouTube Data API v3.
 type Client struct {
 	auth *Auth
 	hc   *http.Client
 }
 
-// NewClient wires the API client to its token source.
+// NewClient returns a Client authenticating with auth.
 func NewClient(auth *Auth) *Client {
 	return &Client{auth: auth, hc: &http.Client{Timeout: 30 * time.Second}}
 }
@@ -179,9 +178,7 @@ type broadcastListResponse struct {
 
 const broadcastParts = "id,snippet,status,contentDetails"
 
-// ListBroadcasts fetches the channel's scheduled ("event") broadcasts by lifecycle
-// filter, "upcoming" or "active"; the persistent default broadcast is excluded.
-// Costs 1 quota unit.
+// ListBroadcasts lists event broadcasts by "upcoming" or "active". Costs 1 quota unit.
 func (c *Client) ListBroadcasts(ctx context.Context, broadcastStatus string) ([]Broadcast, error) {
 	var out broadcastListResponse
 	err := c.do(ctx, http.MethodGet, apiBase+"/liveBroadcasts", url.Values{
@@ -200,8 +197,7 @@ func (c *Client) ListBroadcasts(ctx context.Context, broadcastStatus string) ([]
 	return list, nil
 }
 
-// GetBroadcast fetches one broadcast by id; ok is false when it no longer exists.
-// Costs 1 quota unit.
+// GetBroadcast fetches one broadcast; ok is false when it no longer exists. Costs 1 quota unit.
 func (c *Client) GetBroadcast(ctx context.Context, id string) (Broadcast, bool, error) {
 	var out broadcastListResponse
 	err := c.do(ctx, http.MethodGet, apiBase+"/liveBroadcasts", url.Values{
@@ -217,8 +213,8 @@ func (c *Client) GetBroadcast(ctx context.Context, id string) (Broadcast, bool, 
 	return out.Items[0].broadcast(), true, nil
 }
 
-// insertBody has no omitempty on the auto flags so every insert states false
-// explicitly: transitions happen only through the buttons, never because OBS started.
+// No omitempty on the auto flags: every insert must state false explicitly, so only
+// the buttons ever transition a broadcast.
 type insertBody struct {
 	Snippet struct {
 		Title              string `json:"title"`
@@ -255,8 +251,7 @@ func newInsertBody(n NewBroadcast) insertBody {
 	return body
 }
 
-// Read-only fields YouTube documents on each part; stripped from the echoed
-// update body so the PUT carries only what the API accepts as input.
+// Documented read-only fields, stripped so the echoed body is valid input.
 var readOnlyFields = map[string][]string{
 	"snippet":        {"publishedAt", "channelId", "thumbnails", "isDefaultBroadcast", "liveChatId", "actualStartTime", "actualEndTime"},
 	"status":         {"lifeCycleStatus", "recordingStatus", "madeForKids"},
@@ -289,8 +284,7 @@ func cloneOrEmpty(m map[string]any) map[string]any {
 	return maps.Clone(m)
 }
 
-// InsertBroadcast creates a scheduled broadcast with auto start/stop off and the
-// monitor stream disabled, so ready → live is a single transition. Costs 50 quota units.
+// InsertBroadcast creates a scheduled broadcast. Costs 50 quota units.
 func (c *Client) InsertBroadcast(ctx context.Context, n NewBroadcast) (Broadcast, error) {
 	var out apiBroadcastItem
 	err := c.do(ctx, http.MethodPost, apiBase+"/liveBroadcasts", url.Values{"part": {broadcastParts}}, newInsertBody(n), &out)
@@ -300,8 +294,7 @@ func (c *Client) InsertBroadcast(ctx context.Context, n NewBroadcast) (Broadcast
 	return out.broadcast(), nil
 }
 
-// UpdateBroadcast writes b's title, description, scheduled start and privacy over the
-// broadcast as last fetched, keeping auto start/stop off. Costs 50 quota units.
+// UpdateBroadcast writes b over the broadcast as last fetched. Costs 50 quota units.
 func (c *Client) UpdateBroadcast(ctx context.Context, b Broadcast) (Broadcast, error) {
 	var out apiBroadcastItem
 	err := c.do(ctx, http.MethodPut, apiBase+"/liveBroadcasts", url.Values{"part": {broadcastParts}}, updateBody(b), &out)
@@ -325,7 +318,7 @@ func (c *Client) Transition(ctx context.Context, id, broadcastStatus string) err
 	}, nil, nil)
 }
 
-// Bind attaches a liveStream (the encoder's stream key) to a broadcast. Costs 50 quota units.
+// Bind attaches a liveStream to a broadcast. Costs 50 quota units.
 func (c *Client) Bind(ctx context.Context, broadcastID, streamID string) error {
 	return c.do(ctx, http.MethodPost, apiBase+"/liveBroadcasts/bind", url.Values{
 		"part":     {"id,contentDetails"},
@@ -409,9 +402,7 @@ type Channel struct {
 	Title string
 }
 
-// MyChannel returns the authenticated channel; with a Brand Account this is whichever
-// identity was picked on Google's account chooser, not the Google account itself.
-// Costs 1 quota unit.
+// MyChannel returns the channel the token acts on. Costs 1 quota unit.
 func (c *Client) MyChannel(ctx context.Context) (Channel, error) {
 	var out struct {
 		Items []struct {
@@ -431,7 +422,7 @@ func (c *Client) MyChannel(ctx context.Context) (Channel, error) {
 	return Channel{ID: out.Items[0].ID, Title: out.Items[0].Snippet.Title}, nil
 }
 
-// SetThumbnail uploads a thumbnail image for the broadcast's video. Costs 50 quota units.
+// SetThumbnail uploads a thumbnail for the broadcast. Costs 50 quota units.
 func (c *Client) SetThumbnail(ctx context.Context, videoID, contentType string, image []byte) error {
 	if len(image) > MaxThumbnailBytes {
 		return fmt.Errorf("thumbnail is %d bytes; YouTube's limit is %d", len(image), MaxThumbnailBytes)

@@ -1,6 +1,5 @@
-// Package store persists everything the add-on remembers — presets, the refresh
-// token and small settings — in one SQLite file under /data, with thumbnail images
-// beside it in one directory. Two paths to back up; one schema version to migrate.
+// Package store persists presets, image records, settings and the refresh token in
+// one SQLite file, with image files in one directory beside it.
 package store
 
 import (
@@ -26,7 +25,13 @@ const (
 	KeyLastPreset   = "last_preset_id"
 )
 
-const schemaVersion = 1
+// ErrImageInUse is returned when deleting an image a preset still references.
+var ErrImageInUse = errors.New("image is used by a preset")
+
+// ErrImageNotFound is returned for an unknown image id.
+var ErrImageNotFound = errors.New("image not found")
+
+const schemaVersion = 2
 
 var migrations = []string{
 	`CREATE TABLE presets (
@@ -46,7 +51,34 @@ var migrations = []string{
 		key TEXT PRIMARY KEY NOT NULL,
 		value TEXT NOT NULL
 	)`,
+	`CREATE TABLE images (
+		id TEXT PRIMARY KEY NOT NULL,
+		file TEXT NOT NULL UNIQUE,
+		name TEXT NOT NULL,
+		size INTEGER NOT NULL DEFAULT 0,
+		created_at INTEGER NOT NULL
+	);
+	ALTER TABLE presets ADD COLUMN image_id TEXT NOT NULL DEFAULT '';
+	INSERT INTO images (id, file, name, size, created_at)
+		SELECT lower(hex(randomblob(6))), thumbnail_file, name || ' thumbnail', 0, created_at
+		FROM presets WHERE thumbnail_file != '';
+	UPDATE presets SET image_id = (SELECT id FROM images WHERE images.file = presets.thumbnail_file)
+		WHERE thumbnail_file != '';
+	ALTER TABLE presets DROP COLUMN thumbnail_file`,
 }
+
+// Image is one library entry.
+type Image struct {
+	ID        string
+	File      string
+	Name      string
+	Size      int64
+	UsedBy    int
+	CreatedAt time.Time
+}
+
+// ContentType is the MIME type implied by the file name.
+func (i Image) ContentType() string { return contentType(i.File) }
 
 // Store is the open database plus the images directory.
 type Store struct {
@@ -55,8 +87,7 @@ type Store struct {
 	now    func() time.Time
 }
 
-// Open opens or creates the database, brings the schema up to date and ensures the
-// images directory exists.
+// Open opens or creates the database and migrates it to the current schema.
 func Open(ctx context.Context, path, imagesDir string) (*Store, error) {
 	if err := os.MkdirAll(imagesDir, 0o700); err != nil {
 		return nil, fmt.Errorf("images dir: %w", err)
@@ -67,7 +98,7 @@ func Open(ctx context.Context, path, imagesDir string) (*Store, error) {
 	}
 	// why: one pooled connection avoids SQLITE_BUSY between the web and controller goroutines.
 	db.SetMaxOpenConns(1)
-	for _, pragma := range []string{"PRAGMA journal_mode = WAL", "PRAGMA synchronous = NORMAL", "PRAGMA busy_timeout = 5000", "PRAGMA foreign_keys = ON"} {
+	for _, pragma := range []string{"PRAGMA journal_mode = WAL", "PRAGMA synchronous = NORMAL", "PRAGMA busy_timeout = 5000"} {
 		if _, err := db.ExecContext(ctx, pragma); err != nil {
 			return nil, errors.Join(fmt.Errorf("%s: %w", pragma, err), db.Close())
 		}
@@ -122,6 +153,12 @@ func (s *Store) SetSetting(ctx context.Context, key, value string) error {
 	return err
 }
 
+// DeleteSetting removes a settings value; a missing key is not an error.
+func (s *Store) DeleteSetting(ctx context.Context, key string) error {
+	_, err := s.db.ExecContext(ctx, "DELETE FROM settings WHERE key = ?", key)
+	return err
+}
+
 // LoadToken makes the Store the Auth's TokenStore.
 func (s *Store) LoadToken(ctx context.Context) (string, bool, error) {
 	return s.Setting(ctx, KeyRefreshToken)
@@ -137,18 +174,12 @@ func (s *Store) ClearToken(ctx context.Context) error {
 	return s.DeleteSetting(ctx, KeyRefreshToken)
 }
 
-// DeleteSetting removes a settings value; a missing key is not an error.
-func (s *Store) DeleteSetting(ctx context.Context, key string) error {
-	_, err := s.db.ExecContext(ctx, "DELETE FROM settings WHERE key = ?", key)
-	return err
-}
-
-const presetColumns = "id, name, title_template, description, privacy, stream_id, weekday, time_of_day, thumbnail_file"
+const presetColumns = "id, name, title_template, description, privacy, stream_id, weekday, time_of_day, image_id"
 
 func scanPreset(row interface{ Scan(...any) error }) (preset.Preset, error) {
 	var p preset.Preset
 	var weekday int
-	err := row.Scan(&p.ID, &p.Name, &p.TitleTemplate, &p.Description, &p.Privacy, &p.StreamID, &weekday, &p.TimeOfDay, &p.ThumbnailFile)
+	err := row.Scan(&p.ID, &p.Name, &p.TitleTemplate, &p.Description, &p.Privacy, &p.StreamID, &weekday, &p.TimeOfDay, &p.ImageID)
 	p.Weekday = time.Weekday(weekday)
 	return p, err
 }
@@ -183,26 +214,30 @@ func (s *Store) GetPreset(ctx context.Context, id string) (preset.Preset, error)
 	return p, err
 }
 
-// SavePreset inserts or updates a preset, assigning an id when it has none. The
-// thumbnail file name is owned by SetThumbnail and left untouched on update.
+// SavePreset inserts (empty ID) or updates a preset.
 func (s *Store) SavePreset(ctx context.Context, p preset.Preset) (preset.Preset, error) {
 	if err := p.Validate(); err != nil {
 		return preset.Preset{}, err
+	}
+	if p.ImageID != "" {
+		if _, err := s.GetImage(ctx, p.ImageID); err != nil {
+			return preset.Preset{}, err
+		}
 	}
 	now := s.now().Unix()
 	if p.ID == "" {
 		p.ID = newID()
 		_, err := s.db.ExecContext(ctx,
-			"INSERT INTO presets (id, name, title_template, description, privacy, stream_id, weekday, time_of_day, thumbnail_file, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-			p.ID, p.Name, p.TitleTemplate, p.Description, p.Privacy, p.StreamID, int(p.Weekday), p.TimeOfDay, p.ThumbnailFile, now, now)
+			"INSERT INTO presets (id, name, title_template, description, privacy, stream_id, weekday, time_of_day, image_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			p.ID, p.Name, p.TitleTemplate, p.Description, p.Privacy, p.StreamID, int(p.Weekday), p.TimeOfDay, p.ImageID, now, now)
 		return p, err
 	}
 	if !validID(p.ID) {
 		return preset.Preset{}, preset.ErrNotFound
 	}
 	res, err := s.db.ExecContext(ctx,
-		"UPDATE presets SET name = ?, title_template = ?, description = ?, privacy = ?, stream_id = ?, weekday = ?, time_of_day = ?, updated_at = ? WHERE id = ?",
-		p.Name, p.TitleTemplate, p.Description, p.Privacy, p.StreamID, int(p.Weekday), p.TimeOfDay, now, p.ID)
+		"UPDATE presets SET name = ?, title_template = ?, description = ?, privacy = ?, stream_id = ?, weekday = ?, time_of_day = ?, image_id = ?, updated_at = ? WHERE id = ?",
+		p.Name, p.TitleTemplate, p.Description, p.Privacy, p.StreamID, int(p.Weekday), p.TimeOfDay, p.ImageID, now, p.ID)
 	if err != nil {
 		return preset.Preset{}, err
 	}
@@ -212,84 +247,139 @@ func (s *Store) SavePreset(ctx context.Context, p preset.Preset) (preset.Preset,
 	return s.GetPreset(ctx, p.ID)
 }
 
-// SetThumbnail stores an image for the preset and records its file name; the new
-// file is written before the old one is removed so a failure leaves the old image.
-func (s *Store) SetThumbnail(ctx context.Context, id, ext string, image []byte) (preset.Preset, error) {
-	p, err := s.GetPreset(ctx, id)
-	if err != nil {
-		return preset.Preset{}, err
-	}
-	file := id + "-" + newID() + ext
-	if err := atomicfile.Write(s.imagePath(file), image, 0o600); err != nil {
-		return preset.Preset{}, err
-	}
-	if _, err := s.db.ExecContext(ctx, "UPDATE presets SET thumbnail_file = ?, updated_at = ? WHERE id = ?", file, s.now().Unix(), id); err != nil {
-		_ = os.Remove(s.imagePath(file))
-		return preset.Preset{}, err
-	}
-	if p.ThumbnailFile != "" {
-		_ = os.Remove(s.imagePath(p.ThumbnailFile))
-	}
-	return s.GetPreset(ctx, id)
-}
-
-// Thumbnail returns the preset's image and content type; ok is false when none is set.
-func (s *Store) Thumbnail(ctx context.Context, id string) (image []byte, contentType string, ok bool, err error) {
-	p, err := s.GetPreset(ctx, id)
-	if err != nil || p.ThumbnailFile == "" {
-		return nil, "", false, err
-	}
-	image, err = os.ReadFile(s.imagePath(p.ThumbnailFile))
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, "", false, nil
-	}
-	if err != nil {
-		return nil, "", false, err
-	}
-	return image, preset.ContentType(p.ThumbnailFile), true, nil
-}
-
-// DuplicatePreset copies a preset and its image under a new id, named "<name> (copy)".
+// DuplicatePreset copies a preset as "<name> (copy)", sharing its image.
 func (s *Store) DuplicatePreset(ctx context.Context, id string) (preset.Preset, error) {
 	p, err := s.GetPreset(ctx, id)
 	if err != nil {
 		return preset.Preset{}, err
 	}
-	image, _, hasImage, err := s.Thumbnail(ctx, id)
-	if err != nil {
-		return preset.Preset{}, err
-	}
-	ext := filepath.Ext(p.ThumbnailFile)
-	p.ID, p.ThumbnailFile = "", ""
+	p.ID = ""
 	p.Name += " (copy)"
-	copied, err := s.SavePreset(ctx, p)
-	if err != nil {
-		return preset.Preset{}, err
-	}
-	if hasImage {
-		return s.SetThumbnail(ctx, copied.ID, ext, image)
-	}
-	return copied, nil
+	return s.SavePreset(ctx, p)
 }
 
-// DeletePreset removes a preset and its image.
+// DeletePreset removes a preset; its image stays in the library.
 func (s *Store) DeletePreset(ctx context.Context, id string) error {
-	p, err := s.GetPreset(ctx, id)
+	if !validID(id) {
+		return preset.ErrNotFound
+	}
+	res, err := s.db.ExecContext(ctx, "DELETE FROM presets WHERE id = ?", id)
 	if err != nil {
 		return err
 	}
-	if _, err := s.db.ExecContext(ctx, "DELETE FROM presets WHERE id = ?", id); err != nil {
-		return err
-	}
-	if p.ThumbnailFile != "" {
-		_ = os.Remove(s.imagePath(p.ThumbnailFile))
+	if n, _ := res.RowsAffected(); n == 0 {
+		return preset.ErrNotFound
 	}
 	return nil
 }
 
-// imagePath confines file access to the images directory whatever the stored name.
+const imageColumns = "i.id, i.file, i.name, i.size, i.created_at, (SELECT count(*) FROM presets p WHERE p.image_id = i.id)"
+
+func scanImage(row interface{ Scan(...any) error }) (Image, error) {
+	var img Image
+	var created int64
+	err := row.Scan(&img.ID, &img.File, &img.Name, &img.Size, &created, &img.UsedBy)
+	img.CreatedAt = time.Unix(created, 0)
+	return img, err
+}
+
+// ListImages returns the library, newest first.
+func (s *Store) ListImages(ctx context.Context) ([]Image, error) {
+	rows, err := s.db.QueryContext(ctx, "SELECT "+imageColumns+" FROM images i ORDER BY i.created_at DESC, i.id")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Image
+	for rows.Next() {
+		img, err := scanImage(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, img)
+	}
+	return out, rows.Err()
+}
+
+// GetImage loads one library entry.
+func (s *Store) GetImage(ctx context.Context, id string) (Image, error) {
+	if !validID(id) {
+		return Image{}, ErrImageNotFound
+	}
+	img, err := scanImage(s.db.QueryRowContext(ctx, "SELECT "+imageColumns+" FROM images i WHERE i.id = ?", id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Image{}, ErrImageNotFound
+	}
+	return img, err
+}
+
+// AddImage stores an image; the file lands before the row so a failed insert dangles nothing.
+func (s *Store) AddImage(ctx context.Context, name, imageContentType string, data []byte) (Image, error) {
+	id := newID()
+	file := id + extensionFor(imageContentType)
+	if err := atomicfile.Write(s.imagePath(file), data, 0o600); err != nil {
+		return Image{}, err
+	}
+	if strings.TrimSpace(name) == "" {
+		name = file
+	}
+	_, err := s.db.ExecContext(ctx, "INSERT INTO images (id, file, name, size, created_at) VALUES (?, ?, ?, ?, ?)", id, file, name, len(data), s.now().Unix())
+	if err != nil {
+		_ = os.Remove(s.imagePath(file))
+		return Image{}, err
+	}
+	return s.GetImage(ctx, id)
+}
+
+// ImageBytes reads an image's file.
+func (s *Store) ImageBytes(ctx context.Context, id string) (data []byte, imageContentType string, err error) {
+	img, err := s.GetImage(ctx, id)
+	if err != nil {
+		return nil, "", err
+	}
+	data, err = os.ReadFile(s.imagePath(img.File))
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, "", ErrImageNotFound
+	}
+	if err != nil {
+		return nil, "", err
+	}
+	return data, img.ContentType(), nil
+}
+
+// DeleteImage removes an unused image and its file.
+func (s *Store) DeleteImage(ctx context.Context, id string) error {
+	img, err := s.GetImage(ctx, id)
+	if err != nil {
+		return err
+	}
+	if img.UsedBy > 0 {
+		return ErrImageInUse
+	}
+	if _, err := s.db.ExecContext(ctx, "DELETE FROM images WHERE id = ?", id); err != nil {
+		return err
+	}
+	_ = os.Remove(s.imagePath(img.File))
+	return nil
+}
+
+// filepath.Base confines access to the images directory whatever the stored name.
 func (s *Store) imagePath(name string) string {
 	return filepath.Join(s.images, filepath.Base(name))
+}
+
+func extensionFor(imageContentType string) string {
+	if imageContentType == "image/png" {
+		return ".png"
+	}
+	return ".jpg"
+}
+
+func contentType(file string) string {
+	if strings.EqualFold(filepath.Ext(file), ".png") {
+		return "image/png"
+	}
+	return "image/jpeg"
 }
 
 func newID() string {
@@ -298,7 +388,7 @@ func newID() string {
 	return hex.EncodeToString(buf)
 }
 
-// validID guards ids supplied over HTTP before they reach SQL or the filesystem.
+// Ids arrive over HTTP; hex-only keeps them out of SQL and paths.
 func validID(id string) bool {
 	return id != "" && strings.Trim(id, "0123456789abcdef") == ""
 }

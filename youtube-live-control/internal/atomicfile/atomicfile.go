@@ -1,5 +1,4 @@
-// Package atomicfile writes small state files so a crash mid-write can never
-// leave a truncated token or settings file behind.
+// Package atomicfile writes files so a crash mid-write cannot leave a truncated one.
 package atomicfile
 
 import (

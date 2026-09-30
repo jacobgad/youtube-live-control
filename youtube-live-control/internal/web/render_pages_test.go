@@ -8,6 +8,7 @@ import (
 
 	"github.com/jacobgad/youtube-live-control/internal/controller"
 	"github.com/jacobgad/youtube-live-control/internal/preset"
+	"github.com/jacobgad/youtube-live-control/internal/store"
 	"github.com/jacobgad/youtube-live-control/internal/youtube"
 )
 
@@ -22,14 +23,16 @@ func TestRenderPagesToDisk(t *testing.T) {
 	next := youtube.Broadcast{ID: "b2", Title: "Sunday Service – 12 Jan 2025", ScheduledStart: start.AddDate(0, 0, 7), PrivacyStatus: "unlisted", LifeCycleStatus: youtube.LifeReady}
 	stale := youtube.Broadcast{ID: "b0", Title: "Christmas Eve", ScheduledStart: start.AddDate(0, 0, -14), LifeCycleStatus: youtube.LifeReady}
 	streams := []youtube.Stream{{ID: "s1", Title: "OBS main", StreamKey: "abcd-efgh-ijkl-mnop", Resolution: "1080p", FrameRate: "30fps"}}
-	p := preset.Preset{ID: "abc123", Name: "Sunday morning", TitleTemplate: "Sunday Service – {date}", Description: "Join us", Privacy: "public", StreamID: "s1", Weekday: time.Sunday, TimeOfDay: "09:30", ThumbnailFile: "abc123.jpg"}
+	library := []store.Image{{ID: "0123456789ab", File: "0123456789ab.jpg", Name: "Sunday", Size: 204800, UsedBy: 1}, {ID: "ba9876543210", File: "ba9876543210.png", Name: "Easter", Size: 51200}}
+	p := preset.Preset{ID: "abc123", Name: "Sunday morning", TitleTemplate: "Sunday Service – {date}", Description: "Join us", Privacy: "public", StreamID: "s1", Weekday: time.Sunday, TimeOfDay: "09:30", ImageID: "0123456789ab"}
 	listing := controller.Listing{Broadcasts: []youtube.Broadcast{live, next}, Stale: []youtube.Broadcast{stale}, SelectedID: "b1", Channel: "St Mary's", Authorized: true}
 	cases := map[string]any{
 		"connection":     connectionData{Configured: true, RedirectURI: "http://localhost:8098/oauth/callback", AuthURL: "#"},
 		"broadcasts":     broadcastsData{Listing: listing, Presets: []preset.Preset{p}},
-		"broadcast_form": broadcastForm{ID: "b1", Title: live.Title, Description: "Join us", Start: start, Privacy: "public", StreamID: "s1", ThumbnailURL: live.ThumbnailURL, Streams: streams, Lifecycle: "ready"},
+		"broadcast_form": broadcastForm{ID: "b1", Title: live.Title, Description: "Join us", Start: start, Privacy: "public", StreamID: "s1", ThumbnailURL: live.ThumbnailURL, Streams: streams, Lifecycle: "ready", Images: library},
 		"presets":        presetsData{Presets: []preset.Preset{p}, Streams: map[string]youtube.Stream{"s1": streams[0]}},
-		"preset_form":    presetFormData{Preset: p, Streams: streams},
+		"preset_form":    presetFormData{Preset: p, Streams: streams, Images: library},
+		"images":         imagesData{Images: library},
 	}
 	for name, data := range cases {
 		f, err := os.Create(filepath.Join(dir, name+".html"))

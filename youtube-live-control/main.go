@@ -1,6 +1,4 @@
-// Command youtube-live-control is the Home Assistant add-on binary: it exposes one
-// YouTube live-broadcast control panel (selector, details, transitions) as MQTT
-// entities and serves the ingress web UI for the one-time Google consent.
+// Command youtube-live-control is the Home Assistant add-on binary.
 package main
 
 import (

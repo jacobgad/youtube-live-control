@@ -15,7 +15,7 @@ import (
 // The web UI drives the same single-writer queue as the MQTT panel, so producer
 // edits and volunteer commands never interleave and every write is read back.
 
-// Listing is the controller's current view of the channel's broadcasts.
+// Listing is the cached view of the channel's broadcasts.
 type Listing struct {
 	Broadcasts []youtube.Broadcast
 	Stale      []youtube.Broadcast
@@ -24,7 +24,7 @@ type Listing struct {
 	Authorized bool
 }
 
-// Listing returns the cached broadcast lists; it costs no quota.
+// Listing returns the cache; it costs no quota.
 func (c *Controller) Listing() Listing {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -37,8 +37,7 @@ func (c *Controller) Listing() Listing {
 	}
 }
 
-// Broadcast returns one broadcast from the cache, refreshing the list once if it is
-// not there (a producer may open a link to something scheduled moments ago).
+// Broadcast reads the cache, refreshing once for something scheduled moments ago.
 func (c *Controller) Broadcast(ctx context.Context, id string) (youtube.Broadcast, bool) {
 	if b, ok := c.cached(id); ok {
 		return b, true
@@ -68,7 +67,7 @@ func (c *Controller) Streams(ctx context.Context) ([]youtube.Stream, error) {
 	return c.yt.ListStreams(ctx)
 }
 
-// Edit is a producer's change to an existing broadcast; empty StreamID leaves the binding alone.
+// Edit is a change to a broadcast; an empty StreamID leaves the binding alone.
 type Edit struct {
 	Title       string
 	Description string
@@ -95,7 +94,7 @@ func (e Edit) Validate() error {
 	return nil
 }
 
-// Update applies an Edit to a broadcast and returns the read-back result.
+// Update applies an Edit and returns the read-back broadcast.
 func (c *Controller) Update(ctx context.Context, id string, edit Edit) (youtube.Broadcast, error) {
 	if err := edit.Validate(); err != nil {
 		return youtube.Broadcast{}, err
@@ -128,15 +127,14 @@ func (c *Controller) Update(ctx context.Context, id string, edit Edit) (youtube.
 	return result, err
 }
 
-// NewBroadcast is a producer's request to schedule a stream, normally from a preset.
+// NewBroadcast is a request to schedule a stream.
 type NewBroadcast struct {
 	Edit
 	Thumbnail     []byte
 	ThumbnailType string
 }
 
-// Create schedules a broadcast from the web UI. Like Schedule on the panel it never
-// changes the selection: only a human does that.
+// Create schedules a broadcast; like Schedule it never changes the selection.
 func (c *Controller) Create(ctx context.Context, req NewBroadcast) (youtube.Broadcast, error) {
 	if err := req.Validate(); err != nil {
 		return youtube.Broadcast{}, err
@@ -188,7 +186,7 @@ func (c *Controller) createBroadcast(ctx context.Context, req NewBroadcast) (you
 	return readback, nil
 }
 
-// Delete removes a broadcast from YouTube. A live broadcast is refused: end it first.
+// Delete removes a broadcast; a live one is refused.
 func (c *Controller) Delete(ctx context.Context, id string) error {
 	if b, ok := c.cached(id); ok && isLive(b) {
 		return errors.New("the broadcast is live; end the stream before deleting it")
@@ -204,7 +202,7 @@ func (c *Controller) Delete(ctx context.Context, id string) error {
 	})
 }
 
-// SetThumbnail uploads a new thumbnail for an existing broadcast.
+// SetThumbnail uploads a thumbnail for a broadcast.
 func (c *Controller) SetThumbnail(ctx context.Context, id, contentType string, image []byte) error {
 	return c.run(ctx, "web_thumbnail", func(ctx context.Context) error {
 		if err := c.yt.SetThumbnail(ctx, id, contentType, image); err != nil {

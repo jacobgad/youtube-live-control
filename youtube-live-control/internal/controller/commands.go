@@ -16,7 +16,7 @@ const (
 	transitionInterval = 3 * time.Second
 )
 
-// ErrNoSelection is returned by panel edits while nothing is selected.
+// ErrNoSelection is returned while nothing is selected.
 var ErrNoSelection = errors.New("no broadcast selected")
 
 // snapTopic is re-sent on failure so the Home Assistant field reverts.

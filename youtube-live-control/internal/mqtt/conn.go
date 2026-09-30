@@ -1,5 +1,4 @@
-// Package mqtt owns everything on the broker side: the connection, topic layout,
-// Home Assistant discovery payloads and routing of inbound commands.
+// Package mqtt is the broker side: connection, topics, discovery and command routing.
 package mqtt
 
 import (

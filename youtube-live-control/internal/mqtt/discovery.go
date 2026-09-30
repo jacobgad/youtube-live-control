@@ -24,8 +24,7 @@ func (m Message) JSON() string {
 	return string(data)
 }
 
-// Options are the dynamic option lists embedded in the selects; discovery is
-// republished whenever any of them changes and retained configs make that idempotent.
+// Options are the option lists embedded in the selects; discovery is republished when they change.
 type Options struct {
 	Broadcasts []string
 	Presets    []string
@@ -52,7 +51,7 @@ const (
 	iconTime      = "mdi:clock-outline"
 	iconSchedule  = "mdi:calendar-plus"
 
-	// MaxTitleLength is YouTube's limit for a broadcast title.
+	// MaxTitleLength is YouTube's limit.
 	MaxTitleLength = 100
 )
 
@@ -143,8 +142,7 @@ func sensor(object, name, icon, stateTopic string, extra map[string]any, categor
 	return m
 }
 
-// A core image entity is the platform-native way to show the thumbnail; MQTT drops
-// entity_picture from json attributes, so an attribute could never do this.
+// MQTT drops entity_picture from json attributes, so the thumbnail needs its own entity.
 func thumbnailImage(o Origin) Message {
 	m := base(NodeID, "image", "thumbnail", "Thumbnail", "", map[string]any{"url_topic": ThumbnailURLState}, o)
 	delete(m.Payload, "icon")

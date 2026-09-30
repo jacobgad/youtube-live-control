@@ -61,7 +61,7 @@ const (
 	ScheduleAvailability = Prefix + "/schedule/availability"
 )
 
-// StageOptions are the Stage sensor's enum states, written for the person at the panel.
+// StageOptions are the Stage sensor's enum states.
 var StageOptions = []string{
 	"no_broadcast", "no_stream_key", "waiting_for_encoder", "ready_to_go_live",
 	"starting", "live", "stream_stopping", "ready_to_end", "ending", "ended",
@@ -72,8 +72,7 @@ func HADiscoveryTopic(component, nodeID, objectID string) string {
 	return HADiscoveryPrefix + "/" + component + "/" + nodeID + "/" + objectID + "/config"
 }
 
-// RetiredConfigTopics are discovery configs published by earlier versions and cleared
-// on every full republish so their entities do not linger in Home Assistant.
+// RetiredConfigTopics are earlier versions' configs, cleared so their entities do not linger.
 var RetiredConfigTopics = []string{
 	HADiscoveryTopic("text", NodeID, "scheduled_start"),
 	HADiscoveryTopic("select", NodeID, "thumbnail"),

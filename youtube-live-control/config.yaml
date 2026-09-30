@@ -1,5 +1,5 @@
 name: YouTube Live Control
-version: "1.4.0"
+version: "1.5.0"
 slug: youtube_live_control
 description: Schedule YouTube live streams from presets, then go live and end them from one Home Assistant panel
 url: https://github.com/jacobgad/youtube-live-control

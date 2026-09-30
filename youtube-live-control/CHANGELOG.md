@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.0
+
+- **Image library** (web UI → Images): upload thumbnails once and pick them on preset and broadcast forms; each image shows how many presets use it and can be deleted once unused. Duplicating a preset now shares its image instead of copying the file. Schema migration 2 moves existing 1.4.0 preset thumbnails into the library.
+- Documentation rewritten around setup, use and reference tables; the dashboard card YAML is gone (Home Assistant's auto-generated device cards cover both devices).
+
 ## 1.4.0
 
 **Fresh setup required.** Storage moves to one SQLite database (`/data/ylc.sqlite`) plus one images directory (`/data/images/`): presets, the last-used preset and the Google refresh token are all in the database, with a versioned schema for future migrations. Nothing is imported from the 1.x JSON files — after updating, connect the Google account again and recreate presets. Backups now mean two paths.

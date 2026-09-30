@@ -1,7 +1,5 @@
-// Package controller orchestrates the add-on: the broadcast selector session behind
-// the Home Assistant panel, the scheduling device, quota-aware polling of the YouTube
-// Data API, and command handling that verifies, writes, then reads back — never
-// publishing optimistically.
+// Package controller owns the panel session, polling and every command's
+// verify → write → read back path; nothing is published optimistically.
 package controller
 
 import (
@@ -36,7 +34,7 @@ type Deps struct {
 	Now     func() time.Time
 }
 
-// Controller is the add-on's long-lived core. Create it with New and drive it with Start/Stop.
+// Controller is the add-on's core; New, then Start and Stop.
 type Controller struct {
 	yt    *youtube.Client
 	auth  *youtube.Auth
@@ -70,7 +68,7 @@ type queuedOp struct {
 	done chan error
 }
 
-// New wires the controller to its MQTT connection; nothing talks to YouTube until Start.
+// New wires the controller; nothing talks to YouTube until Start.
 func New(deps Deps) *Controller {
 	log := deps.Log
 	if log == nil {
@@ -119,8 +117,7 @@ func New(deps Deps) *Controller {
 	return c
 }
 
-// Start publishes discovery and state, loads presets and the broadcast list if already
-// authorized, and begins the two poll loops and the command worker.
+// Start publishes state and begins the poll loops and command worker.
 func (c *Controller) Start(ctx context.Context) error {
 	if !c.started.CompareAndSwap(false, true) {
 		return nil
@@ -158,8 +155,8 @@ func (c *Controller) Start(ctx context.Context) error {
 	return nil
 }
 
-// Stop ends background work, publishes the controller offline and closes MQTT.
-// It gives up waiting when ctx expires so a stuck API call cannot block shutdown.
+// Stop ends background work and closes MQTT; ctx bounds the wait so a stuck API call
+// cannot block shutdown.
 func (c *Controller) Stop(ctx context.Context) {
 	c.endLife()
 	if c.started.Load() {
@@ -421,7 +418,7 @@ func (c *Controller) snapBack(topics ...string) {
 	c.publishUpdate()
 }
 
-// PresetsChanged reloads presets after the web UI edits them.
+// PresetsChanged reloads presets after the web UI changes them.
 func (c *Controller) PresetsChanged(ctx context.Context) {
 	c.loadPresets(ctx)
 	c.resetScheduleDefaults()
@@ -505,11 +502,13 @@ func (c *Controller) schedulePressed() {
 		return
 	}
 	req := NewBroadcast{Edit: Edit{Title: p.Title(start), Description: p.Description, Start: start, Privacy: p.Privacy, StreamID: p.StreamID}}
-	image, ct, has, err := c.store.Thumbnail(c.lifetime, p.ID)
-	if err != nil {
-		c.log.Warn("preset_thumbnail_unreadable", "preset", p.ID, "error", err.Error())
-	} else if has {
-		req.Thumbnail, req.ThumbnailType = image, ct
+	if p.ImageID != "" {
+		image, ct, err := c.store.ImageBytes(c.lifetime, p.ImageID)
+		if err != nil {
+			c.log.Warn("preset_image_unreadable", "preset", p.ID, "image", p.ImageID, "error", err.Error())
+		} else {
+			req.Thumbnail, req.ThumbnailType = image, ct
+		}
 	}
 	c.enqueue("schedule", func(ctx context.Context) error {
 		if _, err := c.createBroadcast(ctx, req); err != nil {

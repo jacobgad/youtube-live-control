@@ -1,5 +1,4 @@
-// Package youtube is the Google side of the add-on: OAuth 2.0 with the refresh token
-// persisted under /data, and a minimal YouTube Data API v3 client for live broadcasts.
+// Package youtube is the Google side: OAuth 2.0 and a minimal Data API v3 client.
 package youtube
 
 import (
@@ -20,8 +19,7 @@ const (
 	authEndpoint  = "https://accounts.google.com/o/oauth2/v2/auth"
 	tokenEndpoint = "https://oauth2.googleapis.com/token" //nolint:gosec // OAuth endpoint URL, not a credential
 
-	// Scope is the only scope requested: full manage access, required by
-	// liveBroadcasts.insert/update/transition and thumbnails.set.
+	// Scope is the only scope requested; insert/update/transition and thumbnails.set need it.
 	Scope = "https://www.googleapis.com/auth/youtube.force-ssl"
 
 	tokenExpirySlack = time.Minute
@@ -37,7 +35,7 @@ type TokenStore interface {
 	ClearToken(ctx context.Context) error
 }
 
-// Auth holds the OAuth client and the stored refresh token, and mints access tokens.
+// Auth mints access tokens from the stored refresh token.
 type Auth struct {
 	clientID     string
 	clientSecret string
@@ -68,8 +66,7 @@ func NewAuth(clientID, clientSecret string, tokens TokenStore, log *slog.Logger)
 	}
 }
 
-// String renders the client without its secret or tokens, so formatting an Auth
-// (or anything holding one) can never leak a credential into logs.
+// String omits the secret and tokens so no fmt path can leak a credential.
 func (a *Auth) String() string {
 	return fmt.Sprintf("youtube.Auth{clientID=%s authorized=%v}", a.clientID, a.Authorized())
 }
@@ -77,12 +74,12 @@ func (a *Auth) String() string {
 // GoString mirrors String for %#v, which bypasses Stringer.
 func (a *Auth) GoString() string { return a.String() }
 
-// LogValue renders the client for slog without the secret or tokens.
+// LogValue mirrors String for slog.
 func (a *Auth) LogValue() slog.Value {
 	return slog.GroupValue(slog.String("clientID", a.clientID), slog.Bool("authorized", a.Authorized()))
 }
 
-// OnChange registers the single observer notified when authorization is gained or lost.
+// OnChange registers the observer notified when authorization is gained or lost.
 func (a *Auth) OnChange(fn func(authorized bool)) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -92,7 +89,7 @@ func (a *Auth) OnChange(fn func(authorized bool)) {
 // Configured reports whether a Google OAuth client is set in the add-on options.
 func (a *Auth) Configured() bool { return a.clientID != "" && a.clientSecret != "" }
 
-// Load reads the persisted refresh token; none stored is a normal first run.
+// Load reads the persisted refresh token; none stored is a first run, not an error.
 func (a *Auth) Load(ctx context.Context) error {
 	token, ok, err := a.tokens.LoadToken(ctx)
 	if err != nil {
@@ -114,9 +111,8 @@ func (a *Auth) Authorized() bool {
 	return a.refresh != ""
 }
 
-// AuthURL builds the Google consent URL. prompt=consent guarantees a refresh token on
-// every completed consent; select_account forces the chooser so an account managing
-// several channels (Brand Accounts) always picks which channel the token acts on.
+// AuthURL builds the consent URL. prompt=consent guarantees a refresh token; select_account
+// makes an account with several channels (Brand Accounts) pick which one the token acts on.
 func (a *Auth) AuthURL(redirectURI, state string) string {
 	q := url.Values{
 		"client_id":     {a.clientID},
@@ -201,8 +197,7 @@ func (a *Auth) AccessToken(ctx context.Context) (string, error) {
 	return resp.AccessToken, nil
 }
 
-// Flips the UI and Authorization sensor to unauthorized instead of erroring forever;
-// only the token that failed is cleared, so a consent that landed meanwhile is kept.
+// Only the token that failed is cleared, so a consent that landed meanwhile is kept.
 func (a *Auth) revoke(ctx context.Context, failed string) {
 	a.mu.Lock()
 	if a.refresh != failed {

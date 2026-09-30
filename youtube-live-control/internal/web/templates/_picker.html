@@ -1,0 +1,17 @@
+{{define "picker"}}
+<div class="picker">
+{{if .Keep}}
+<label class="tile"><input type="radio" name="image_id" value="" {{if not .Selected}}checked{{end}}><span class="tile-body muted">Keep current</span></label>
+{{else}}
+<label class="tile"><input type="radio" name="image_id" value="" {{if not .Selected}}checked{{end}}><span class="tile-body muted">No thumbnail</span></label>
+{{end}}
+{{range .Images}}
+<label class="tile"><input type="radio" name="image_id" value="{{.ID}}" {{if eq .ID $.Selected}}checked{{end}}><img src="{{$.Base}}/images/{{.ID}}" alt=""><span class="tile-body">{{.Name}}</span></label>
+{{end}}
+</div>
+<div class="field">
+<label for="thumbnail">…or upload a new image</label>
+<input type="file" id="thumbnail" name="thumbnail" accept="image/jpeg,image/png">
+<p class="hint">JPEG or PNG, up to 2 MB, ideally 1280×720. An upload is used instead of the choice above and is added to the library.</p>
+</div>
+{{end}}

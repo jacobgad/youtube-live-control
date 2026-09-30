@@ -1,10 +1,8 @@
-// Package preset is the reusable broadcast template (title pattern, description,
-// privacy, stream key, thumbnail, usual day and time) a producer schedules from.
+// Package preset is the reusable broadcast template a producer schedules from.
 package preset
 
 import (
 	"errors"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,8 +14,7 @@ const DatePlaceholder = "{date}"
 
 const dateFormat = "2 Jan 2006"
 
-// Preset is one template. ThumbnailFile is the image's file name inside the images
-// directory, empty when the preset has no thumbnail.
+// Preset is one template; an empty ImageID means no thumbnail.
 type Preset struct {
 	ID            string
 	Name          string
@@ -27,10 +24,10 @@ type Preset struct {
 	StreamID      string
 	Weekday       time.Weekday
 	TimeOfDay     string
-	ThumbnailFile string
+	ImageID       string
 }
 
-// Validate reports the first problem with a preset as a user-facing message.
+// Validate reports the first problem as a user-facing message.
 func (p Preset) Validate() error {
 	switch {
 	case strings.TrimSpace(p.Name) == "":
@@ -73,11 +70,3 @@ func (p Preset) NextStart(now time.Time) time.Time {
 
 // ErrNotFound is returned for an unknown preset id.
 var ErrNotFound = errors.New("preset not found")
-
-// ContentType maps a thumbnail file name to its MIME type.
-func ContentType(name string) string {
-	if strings.EqualFold(filepath.Ext(name), ".png") {
-		return "image/png"
-	}
-	return "image/jpeg"
-}

@@ -4,8 +4,8 @@
 <p><a class="button primary" href="{{$.Base}}/presets/new">New preset</a></p>
 {{if not .Presets}}<div class="card muted">No presets yet.</div>{{end}}
 {{range .Presets}}
-<div class="card item {{if not .ThumbnailFile}}no-thumb{{end}}">
-{{if .ThumbnailFile}}<img class="thumb" src="{{$.Base}}/presets/{{.ID}}/thumbnail" alt="">{{end}}
+<div class="card item {{if not .ImageID}}no-thumb{{end}}">
+{{if .ImageID}}<img class="thumb" src="{{$.Base}}/images/{{.ImageID}}" alt="">{{end}}
 <div>
 <div><strong><a href="{{$.Base}}/presets/{{.ID}}">{{.Name}}</a></strong></div>
 <div class="meta">{{.TitleTemplate}} · {{.Weekday}} {{.TimeOfDay}} · {{.Privacy}}

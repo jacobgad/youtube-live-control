@@ -1,76 +1,65 @@
 # YouTube Live Control
 
-Home Assistant add-on for running a channel's scheduled YouTube live streams. Producers **schedule from presets** on the dashboard (preset · date · time · Schedule); volunteers **operate** from the dashboard (Broadcast · Title · Privacy · **Stage** · Go Live / End Stream). Presets, descriptions, thumbnails and off-pattern dates are set up in the add-on's web UI. Dashboards, automations and access control are Home Assistant's job; the add-on is only the YouTube driver.
+Home Assistant add-on that runs a channel's scheduled YouTube live streams. Producers schedule from presets on the dashboard; volunteers go live and end from the same dashboard; the web UI holds presets, thumbnails and one-off edits.
 
 User documentation: [`youtube-live-control/DOCS.md`](youtube-live-control/DOCS.md).
 
-## How it works
+## Design
 
 ```text
-Home Assistant ──MQTT──▶ Mosquitto ◀──MQTT── YouTube Live Control ──HTTPS──▶ YouTube Data API v3
+Home Assistant ──MQTT──▶ Mosquitto ◀──MQTT── youtube-live-control ──HTTPS──▶ YouTube Data API v3
       │                                        │
-      └─ ingress web UI ───────────────────────┼─ OAuth consent · presets · schedule/edit broadcasts
+      └─ ingress web UI ───────────────────────┼─ OAuth consent · presets · images · broadcast editor
                                                ├─ SQLite (/data/ylc.sqlite) + /data/images
-                                               ├─ tiered polling: idle 10 min · live 60 s · fast 3 s
+                                               ├─ polling: idle · live · fast (presence-driven)
                                                └─ commands: verify → write → read back
 ```
 
-- **Two devices, platform-native entities.** *YouTube Live Scheduling* (Preset / Date / Time / Schedule) creates from presets; *YouTube Live* is the selected broadcast: Broadcast select (sorted live-first, soonest-first; nothing selects automatically), Title and Privacy applied immediately, a **Stage** enum sensor, a timestamp **Scheduled start**, **Live** / **Encoder connected** binary sensors, Go Live / End Stream. A core image entity carries the thumbnail; the watch URL rides along as an attribute. Everything renders with core Lovelace cards; there is never one entity per broadcast.
-- **Writes are verified.** Before any command the broadcast and its bound stream are re-read from the API; after the write, the result is read back before Home Assistant is updated. Nothing is published optimistically.
-- **Transitions are gated on reality.** Go Live requires the encoder's `streamStatus` to be `active`; End Stream requires being live with the stream no longer active. `enableAutoStart`/`enableAutoStop` are always written as `false`, so only the buttons ever transition a broadcast. While `streamStatus` lags a stopped encoder, Stage shows `stream_stopping`.
-- **Nothing transitions on its own.** State is retained, commands are not, retained replays are dropped: restarts of the add-on, the broker or Home Assistant republish state but never start or stop a broadcast.
-- **Quota-aware, presence-driven polling.** Three tiers, all only while a broadcast is selected: a 10-minute idle baseline, a 60-second cadence while live, and a 3-second fast window (~40 units/min, capped at 5 minutes) armed by any panel interaction — including refused button presses — or by the **Fast refresh** switch, which the add-on itself turns off on expiry. A countdown sensor shows minutes remaining.
-- **Configuration and control are separate.** Poll cadences and the fast window are add-on options; the MQTT device carries only what operates YouTube.
-
-Everything the add-on remembers — presets, settings, the refresh token — lives in one SQLite file (`/data/ylc.sqlite`, pure-Go driver, schema versioned via `user_version`) with thumbnails in `/data/images/`: two paths to back up, one schema to migrate. Single static Go binary on plain Alpine. The only web surface is the ingress OAuth console plus a `:8098` redirect endpoint. Google's OAuth policy only allows plain-`http` redirects to localhost, so by default consent uses a **Desktop app** client with a `http://localhost:8098` redirect and the volunteer pastes the resulting URL back into the console; an https `external_url` in front of `:8098` makes the redirect complete on its own.
+- **Two MQTT devices.** *YouTube Live Scheduling* creates broadcasts from presets (Preset, Date, Time, Schedule). *YouTube Live* is the selected broadcast: Broadcast select, Title and Privacy applied immediately, a Stage enum sensor, timestamp, image and binary sensors, Go Live and End Stream. Every entity is a core Home Assistant platform.
+- **Nothing is optimistic.** Commands re-read the broadcast and stream, write, then read back before publishing. State topics are retained, command topics are not, replays are dropped. `enableAutoStart`/`enableAutoStop` are always false; Go Live needs the stream `active`, End Stream needs it stopped.
+- **Nothing selects itself.** The Broadcast select is sorted live-first then soonest; only a person changes it.
+- **Polling follows people.** Idle, live and fast tiers; any panel interaction arms the fast window, which expires on its own.
+- **Storage is one database and one directory.** Presets, image records, settings and the refresh token in SQLite with a versioned schema; thumbnails as files.
 
 ## MQTT contract
 
-Prefix `ylc/`. State is retained; commands (`…/set`, `…/press`) are not, and retained messages are never acted on.
+Prefix `ylc/`. State retained, commands not.
 
 | Topic | Purpose |
 | --- | --- |
-| `ylc/controller/availability` | controller online/offline; also the Last Will |
-| `ylc/auth/state` | `authorized` / `unauthorized`; command entities list it as an availability |
-| `ylc/channel/state` | title of the connected YouTube channel |
-| `ylc/broadcast/{state,set}` | Broadcast select (labels); `ylc/broadcast/attributes` carries id, scheduled_start, privacy, lifecycle, thumbnail_url, watch_url |
-| `ylc/thumbnail/{url,availability}` | image entity source URL and availability |
-| `ylc/title/{state,set}` | Title text, written to YouTube on Enter |
-| `ylc/privacy/{state,set}` | Privacy select (`public` / `unlisted` / `private`), written immediately |
-| `ylc/stage/state` | Stage enum: `no_broadcast` `no_stream_key` `waiting_for_encoder` `ready_to_go_live` `starting` `live` `stream_stopping` `ready_to_end` `ending` `ended` |
-| `ylc/scheduled_start/state` | RFC 3339 timestamp |
-| `ylc/{live,encoder}/state` | binary sensors (`ON`/`OFF`) |
-| `ylc/fast_mode/{state,set}` | Fast refresh switch (`ON`/`OFF`; add-on publishes `OFF` on expiry) |
-| `ylc/fast_mode_remaining/state` | minutes left in the fast window |
-| `ylc/{stream_health,broadcast_status}/state` | diagnostic sensors |
-| `ylc/{go_live,end_stream}/press` | buttons |
-| `ylc/{go_live,end_stream}/availability` | per-button gates |
-| `ylc/preset/{state,set}` | Preset select |
-| `ylc/date/{state,set}`, `ylc/time/{state,set}` | `date` / `time` entities, ISO values (`None` while unset) |
-| `ylc/schedule/press`, `ylc/schedule/availability` | Schedule button and gate |
+| `controller/availability` | online/offline; also the Last Will |
+| `auth/state`, `channel/state` | `authorized`/`unauthorized`; connected channel |
+| `broadcast/{state,set,attributes}` | Broadcast select; attributes `id`, `scheduled_start`, `privacy`, `lifecycle`, `thumbnail_url`, `watch_url` |
+| `title/{state,set}`, `privacy/{state,set}` | written to YouTube on change |
+| `stage/state` | `no_broadcast` `no_stream_key` `waiting_for_encoder` `ready_to_go_live` `starting` `live` `stream_stopping` `ready_to_end` `ending` `ended` |
+| `scheduled_start/state` | RFC 3339, or `None` |
+| `thumbnail/{url,availability}` | image entity |
+| `live/state`, `encoder/state` | `ON`/`OFF` |
+| `{go_live,end_stream}/{press,availability}` | buttons and their gates |
+| `fast_mode/{state,set}`, `fast_mode_remaining/state` | fast-refresh window |
+| `{stream_health,broadcast_status}/state` | diagnostics |
+| `preset/{state,set}`, `date/{state,set}`, `time/{state,set}` | scheduling inputs (`date`/`time` platforms, HA ≥ 2026.5) |
+| `schedule/{press,availability}` | Schedule button and gate |
 
-Device identifiers `ylc:controller` (entities `youtube_live_control_<object>`) and `ylc:scheduling` (entities `youtube_live_scheduling_<object>`, `via_device` the former); discovery configs under `homeassistant/<component>/<node>/<object>/config`, republished when select options change.
+Devices `ylc:controller` (entities `youtube_live_control_*`) and `ylc:scheduling` (entities `youtube_live_scheduling_*`, `via_device` the former). Discovery under `homeassistant/<component>/<node>/<object>/config`.
 
-## YouTube API usage
+## YouTube API calls
 
 | Call | When | Units |
 | --- | --- | --- |
-| `liveBroadcasts.list` (upcoming, active) | list poll | 1 + 1 |
-| `liveBroadcasts.list` (id) + `liveStreams.list` | status poll (tiered), and as the verify/read-back around every command | 1 + 1 |
-| `liveStreams.list` (mine), `channels.list` (mine) | web UI forms, connection | 1 |
-| `liveBroadcasts.insert` / `update` / `bind` / `transition`, `thumbnails.set` | Schedule, web UI actions, Title/Privacy edits, buttons | 50 each |
-
-Broadcasts created by the add-on disable the monitor stream (`ready → live` in one transition) and are bound to the channel's reusable stream key so OBS's fixed key attaches. Studio-created broadcasts with a monitor stream are taken through `testing` automatically.
+| `liveBroadcasts.list` upcoming + active | list poll | 2 |
+| `liveBroadcasts.list` by id, `liveStreams.list` by id | status poll; before and after every command | 1 + 1 |
+| `liveStreams.list` mine, `channels.list` mine | web UI forms, connection | 1 |
+| `liveBroadcasts.insert` / `update` / `delete` / `bind` / `transition`, `thumbnails.set` | Schedule, edits, buttons | 50 |
 
 ## Development
 
-Requires Go ≥ 1.27, [golangci-lint](https://golangci-lint.run) v2, Docker for images. CI runs the same gate on every push, validates the add-on config and builds the image for both supported architectures.
+Go ≥ 1.27, golangci-lint v2, Docker for images. CI runs the add-on linter, lint and race tests, and builds both architectures.
 
 ```bash
 cd youtube-live-control
 go test -race ./...
 golangci-lint run
-docker build --build-arg BUILD_VERSION=dev .
 ```
 
-Run outside the Supervisor by setting `MQTT_HOST` (plus `MQTT_PORT`/`MQTT_USERNAME`/`MQTT_PASSWORD`/`MQTT_SSL`), `YLC_OPTIONS_PATH` to a local options JSON, `YLC_DATABASE_PATH` and `YLC_IMAGES_DIR` for local storage.
+Outside the Supervisor set `MQTT_HOST` (and `MQTT_PORT`, `MQTT_USERNAME`, `MQTT_PASSWORD`, `MQTT_SSL`), `YLC_OPTIONS_PATH`, `YLC_DATABASE_PATH` and `YLC_IMAGES_DIR`.

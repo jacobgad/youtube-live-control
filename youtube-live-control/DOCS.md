@@ -2,231 +2,171 @@
 
 Runs a channel's scheduled YouTube live streams from Home Assistant.
 
-- **Schedule** from the dashboard: pick a **preset**, confirm date and time in the native pickers, press **Schedule**. Presets (title pattern, description, privacy, stream key, thumbnail, usual day and time) are set up once in the add-on's web UI, which is also where descriptions, thumbnails and off-pattern dates are edited.
-- **Operate** on the day: a volunteer picks the stream (it's the first option), fixes the title if needed, presses **Go Live** once OBS is streaming and **End Stream** after the service. One **Stage** sensor says what to do next.
+- **Producers** schedule from a preset on the dashboard: preset → date → time → **Schedule**. Presets, descriptions, thumbnails and one-off edits live in the add-on's web UI.
+- **Volunteers** operate on the day: pick the stream (it is the first option), fix the title if needed, **Go Live** once OBS is sending, **End Stream** after the service. One **Stage** sensor says what to do next.
 
-## Installation
+## Requirements
 
-1. **Settings → Add-ons → Add-on Store → ⋮ → Repositories**, add this repository's URL.
-2. Install **YouTube Live Control**.
-3. Create a Google OAuth client (below), enter it on the **Configuration** tab, **Start** the add-on.
-4. Open the add-on's web UI — the **Open Web UI** button on the add-on's Info tab, or **YouTube Live** in the sidebar once *Show in sidebar* is on — and connect the channel's Google account once.
-5. Create a preset in the web UI, then schedule from the dashboard. Entities appear under **Settings → Devices & services → MQTT** as two devices: **YouTube Live** and **YouTube Live Scheduling**.
+- Home Assistant 2026.5 or newer
+- The **Mosquitto broker** add-on and the **MQTT integration** (credentials are read from the Supervisor)
+- A Google Cloud project with the **YouTube Data API v3** enabled and an OAuth client (below)
 
-Requires Home Assistant **2026.5 or newer** (for the MQTT date and time entities), the **Mosquitto broker** add-on and the **MQTT integration**. Broker credentials are read from the Supervisor; there is nothing to enter.
+## Setup
 
-## Google OAuth client
+### 1. Google OAuth client
 
-The add-on uses your own OAuth client — there is no shared cloud project and no quota shared with anyone else.
+1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials) create a project and enable the **YouTube Data API v3**.
+2. Configure the **OAuth consent screen** (*Google Auth Platform → Audience*). User type **External**. Add the channel's Google account under **Test users**, then — once connected and working — press **Publish app**: in *Testing* Google expires the refresh token every 7 days. Publishing an unverified app only adds a "Google hasn't verified this app" interstitial; verification is not needed for a private tool.
+3. Create an **OAuth client ID** of type **Desktop app** and copy its ID and secret into the add-on options. Nothing else needs registering: Google's policy only allows plain-`http` redirects to `localhost`, which a Desktop client permits by default.
 
-1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials), create a project and enable the **YouTube Data API v3**.
-2. Configure the **OAuth consent screen** (*Google Auth Platform → Audience* in newer consoles). User type **External** is fine. While the app is in **Testing**, only accounts listed under **Test users** may sign in and refresh tokens expire after **7 days** — add the channel's Google account there to get started, then press **Publish app** once it works so the token stops expiring. Publishing a sensitive-scope app without verification just adds a "Google hasn't verified this app" interstitial (*Advanced → Go to … (unsafe)*) on the consent screen; verification itself is not needed for a private single-channel tool.
-3. Create an **OAuth client ID** of type **Desktop app** and copy the client ID and secret into the add-on options. Nothing needs registering for this type: Google permits its `http://localhost` redirect out of the box, and Google's policy rejects plain-`http` redirects to anything *but* localhost — which is why a LAN address such as `http://homeassistant.local:8098/…` cannot be used.
-4. Restart the add-on, open its web UI and press **Connect Google account**. If the Google account manages more than one channel (Brand Accounts), Google shows a chooser — **pick the channel**, not the account: the connection acts on exactly that channel and only its broadcasts appear. Consent to *Manage your YouTube account* (`youtube.force-ssl`).
-5. Google then sends the browser to `http://localhost:8098/oauth/callback?…`, which shows a "can't connect" page unless that browser is running on the Home Assistant machine. That is expected — copy the whole URL from the address bar and paste it into the form on the web UI. The code in it completes the connection.
+### 2. Connect
 
-If you have a public **https** hostname that forwards to the add-on's port 8098 (a reverse proxy or tunnel), set `external_url` to it, use a **Web application** client instead, and register `<external_url>/oauth/callback` as its authorized redirect URI; the redirect then completes on its own.
+1. Start the add-on and open its web UI (**Open Web UI** on the add-on page, or **YouTube Live** in the sidebar).
+2. Press **Connect Google account**. If the account manages several channels, Google shows a chooser — **pick the channel**, not the account. Only that channel's broadcasts are visible to the add-on.
+3. Consent to *Manage your YouTube account*. Google then sends the browser to `http://localhost:8098/…`, which fails to load unless the browser runs on the Home Assistant machine — expected. Copy the full URL from the address bar and paste it into the form on the web UI.
 
-**Which channel?** A channel only appears on Google's chooser if your Google account is an **owner or manager of its Brand Account** (listed at myaccount.google.com/brandaccounts). Access granted through *YouTube Studio → Settings → Permissions* is Studio-only and invisible to the API; the owner must add you as a Brand Account manager or connect the add-on themselves.
+The web UI header shows the connected channel; the **Channel** sensor shows the same.
 
-The refresh token is stored in the add-on's database (`/data/ylc.sqlite`) and survives restarts and updates. If Google revokes it the **Authorization** sensor flips to `unauthorized` and the web UI asks you to reconnect.
+A channel appears on Google's chooser only if the account is an owner or manager of its **Brand Account** (myaccount.google.com/brandaccounts). Access granted through *YouTube Studio → Settings → Permissions* is Studio-only; the owner must add you as a Brand Account manager or connect themselves.
 
-## Configuration
+If you have a public **https** hostname forwarding to the add-on's port 8098, set `external_url`, use a **Web application** client with `<external_url>/oauth/callback` registered, and the redirect completes on its own.
 
-```yaml
-google_client_id: "1234-abc.apps.googleusercontent.com"
-google_client_secret: "GOCSPX-…"
-external_url: ""
-list_poll_minutes: 5
-fast_poll_seconds: 3
-fast_mode_minutes: 5
-live_poll_seconds: 60
-idle_poll_minutes: 10
-log_level: info
-```
+### 3. Presets
 
-| Option | Default | Meaning |
-| --- | --- | --- |
-| `google_client_id` / `google_client_secret` | required | Your OAuth client. |
-| `external_url` | unset | Public **https** base URL that forwards to the add-on's port 8098. When set, the OAuth redirect is `<external_url>/oauth/callback` and completes automatically; when unset the redirect is `http://localhost:8098/oauth/callback` and you paste the result. |
-| `list_poll_minutes` | `5` | 1–60. How often the broadcast list is re-read. |
-| `fast_poll_seconds` | `3` | 1–30. Cadence while the fast-refresh window is armed. |
-| `fast_mode_minutes` | `5` | 1–60. How long each armed fast-refresh window lasts. |
-| `live_poll_seconds` | `60` | 15–600. Cadence while the selected broadcast is live. |
-| `idle_poll_minutes` | `10` | 1–60. Baseline cadence while a broadcast is selected but idle. |
-| `log_level` | `info` | `debug` / `info` / `warn` / `error` |
-
-Configuration lives here; the MQTT devices are for scheduling and operating; presets, descriptions, thumbnails and off-pattern dates live in the web UI.
-
-## The web UI (prepare)
-
-Open it from the add-on's Info tab or the sidebar. It is restricted to Home Assistant admins and is dark-themed only.
-
-**Presets** — a preset is everything a regular service needs, so scheduling is "pick preset, confirm date":
+Web UI → **Presets → New preset**. A preset is everything a regular service needs:
 
 | Field | Meaning |
 | --- | --- |
 | Name | e.g. *Sunday morning* |
-| Title | The broadcast title; `{date}` becomes the scheduled date, e.g. `Sunday Service – {date}` → *Sunday Service – 5 Jan 2025*. |
-| Description | Copied to each broadcast. |
-| Usual day & time | Pre-fills Date and Time with the next occurrence that isn't already taken, e.g. Sunday 09:30. |
-| Privacy | public / unlisted / private. |
-| Stream key | Which of the channel's stream keys (YouTube Studio → *Stream settings*) the broadcast is bound to — the one OBS is configured with. A broadcast without a stream key can never go live. |
-| Thumbnail | JPEG/PNG up to 2 MB, uploaded to every broadcast scheduled from the preset. |
+| Title | `{date}` becomes the scheduled date: `Sunday Service – {date}` → *Sunday Service – 5 Jan 2025* |
+| Description | copied to each broadcast |
+| Usual day and time | pre-fills Date and Time with the next occurrence that isn't already scheduled |
+| Privacy | public / unlisted / private |
+| Stream key | the channel's stream key OBS is configured with; a broadcast without one can never go live |
+| Thumbnail | from the **Images** library or uploaded here |
 
-**Duplicate** copies a preset (with its thumbnail) as *<name> (copy)* and opens it for editing — the quick way to make a variant such as an evening service. Presets live in `/data/ylc.sqlite`; their images in `/data/images/`. Home Assistant's add-on backups include both.
+**Duplicate** copies a preset as *<name> (copy)* for variants such as an evening service.
 
-**Broadcasts** — lists upcoming and live broadcasts (with the one currently on the Home Assistant panel marked), and *Never started* ones — scheduled more than a day ago and still `ready`, hidden from the panel, with a **Delete** button to clean them up.
+## Using it
 
-- **Schedule a new stream** (the same thing the dashboard's Schedule button does, with a full form): choose a preset → the form is pre-filled → adjust anything, including an off-pattern date → **Schedule**. The add-on creates the broadcast with `enableAutoStart`/`enableAutoStop` off, binds the stream key, uploads the thumbnail and reads it back. It does not change the panel's selection.
-- **Edit** any broadcast: title, description, date-time, privacy, stream key (fix a Studio-made broadcast that shows *no stream key*), replace the thumbnail — or **Delete** it (asks for confirmation; a live broadcast must be ended first).
+### Schedule (dashboard, *YouTube Live Scheduling* device)
 
-Every action goes through the same verified write → read back path as the panel, so the Home Assistant entities update the moment YouTube confirms.
+Pick a **Preset** — **Date** and **Time** jump to its next free usual slot — adjust if this week differs, press **Schedule**. The broadcast is created with the preset's title, description, privacy, stream key and thumbnail, and appears in the **Broadcast** select. Schedule is greyed while no preset is chosen, the preset has no stream key, or the slot is in the past. It never changes which broadcast the panel is on.
 
-## The panel (manage & operate)
+### Operate (dashboard, *YouTube Live* device)
 
-Two MQTT devices. Home Assistant's auto-generated dashboard gives each its own card; the device pages are single-purpose.
+1. Pick the stream in **Broadcast** (sorted live-first, then soonest — the right one is first). Nothing is ever selected for you.
+2. Edit **Title** or **Privacy** if needed; each change is written to YouTube immediately and the field updates once YouTube confirms.
+3. Start OBS. **Stage** goes `waiting_for_encoder` → `ready_to_go_live`; press **Go Live**.
+4. After the service stop OBS. **Stage** shows `stream_stopping` while YouTube catches up (up to a minute), then `ready_to_end`; press **End Stream**.
 
-### Device: YouTube Live — the selected broadcast
+| Stage | Meaning |
+| --- | --- |
+| `no_broadcast` | nothing selected |
+| `no_stream_key` | the broadcast has no stream key — fix it in the web UI |
+| `waiting_for_encoder` | scheduled; OBS is not sending |
+| `ready_to_go_live` | YouTube is receiving the encoder — **Go Live** available |
+| `starting` / `ending` | transition in progress |
+| `live` | on air |
+| `stream_stopping` | OBS stopped; YouTube has not registered it yet |
+| `ready_to_end` | stream stopped — **End Stream** available |
+| `ended` | complete |
 
-| Entity | Type | Behaviour |
+### Web UI
+
+| Tab | Purpose |
+| --- | --- |
+| Broadcasts | schedule from a preset with a full form (any date, off-pattern services); edit title, description, date and time, privacy, stream key, thumbnail; delete. *Never started* lists broadcasts scheduled more than a day ago that never went live — hidden from the panel — for cleanup. |
+| Presets | create, edit, duplicate, delete |
+| Images | the thumbnail library: upload once, reuse anywhere; delete when no preset uses it |
+| Connection | Google account and channel |
+
+The web UI is for Home Assistant admins only.
+
+## Entities
+
+### YouTube Live — the selected broadcast
+
+| Entity | Type | Notes |
 | --- | --- | --- |
-| **Broadcast** | select | Upcoming and live broadcasts, live first then soonest first — so the right one is the first option. **Nothing selects automatically**: after a restart or after End Stream the panel reads *No broadcast selected* until someone picks. Attributes: `id`, `scheduled_start`, `privacy`, `lifecycle`, `thumbnail_url`, `watch_url`. |
-| **Title** | text | Written to YouTube on Enter; the field only changes once YouTube confirms. |
-| **Privacy** | select | public / unlisted / private, written immediately. |
-| **Stage** | sensor (enum) | The one status line: `no_broadcast`, `no_stream_key`, `waiting_for_encoder`, `ready_to_go_live`, `starting`, `live`, `stream_stopping`, `ready_to_end`, `ending`, `ended`. |
-| **Scheduled start** | sensor (timestamp) | Rendered relatively by Home Assistant: *in 3 days*, *in 20 minutes*. |
-| **Thumbnail** | image | The broadcast's thumbnail, for `picture-entity` cards. |
-| **Live** | binary sensor (running) | On while on air (`live`, `stream_stopping`, `ready_to_end`). For automations: ON AIR light, notify, dim the foyer TV. |
-| **Encoder connected** | binary sensor (connectivity) | On while YouTube is receiving the encoder's stream. |
-| **Go Live** | button | Available only in `ready_to_go_live`. |
-| **End Stream** | button | Available only in `ready_to_end`. |
-| **Fast refresh** / **Fast refresh remaining** | switch / sensor | The fast-poll window (see *Quota*): auto-armed by any interaction, re-armable and cancellable by hand; the add-on switches it off when the window expires. |
-| Broadcast status · Stream health · Channel · Authorization | sensors (diagnostic) | Raw YouTube lifecycle, raw ingestion/health, connected channel, `authorized` / `unauthorized`. |
+| Broadcast | select | attributes: `id`, `scheduled_start`, `privacy`, `lifecycle`, `thumbnail_url`, `watch_url` |
+| Title | text | applied on Enter |
+| Privacy | select | applied on change |
+| Stage | sensor (enum) | see table above |
+| Scheduled start | sensor (timestamp) | Home Assistant renders it relatively (*in 20 minutes*) |
+| Thumbnail | image | unavailable while the broadcast has none |
+| Live | binary sensor (running) | on for `live`, `stream_stopping`, `ready_to_end` — for ON AIR lights and notifications |
+| Encoder connected | binary sensor (connectivity) | on while YouTube is receiving the stream |
+| Go Live / End Stream | buttons | available only in `ready_to_go_live` / `ready_to_end` |
+| Fast refresh / Fast refresh remaining | switch / sensor | the fast-poll window (below) |
+| Broadcast status, Stream health, Channel, Authorization | sensors (diagnostic) | raw YouTube values, connected channel, `authorized` / `unauthorized` |
 
-### Device: YouTube Live Scheduling — create from a preset
+### YouTube Live Scheduling
 
-| Entity | Type | Behaviour |
+| Entity | Type |
+| --- | --- |
+| Preset | select |
+| Date | date |
+| Time | time |
+| Schedule | button |
+
+Both devices appear under **Settings → Devices & services → MQTT**; Home Assistant's auto-generated dashboard gives each its own card. Invalid input (empty title, over 100 characters, unknown option) is rejected and the field snaps back.
+
+## Safety
+
+Every write is verified against YouTube first and read back before Home Assistant is updated. State is retained on MQTT, commands are not, and replayed commands are ignored, so restarts never start or stop a stream.
+
+- Broadcasts are written with `enableAutoStart` and `enableAutoStop` **false**: OBS starting or stopping never transitions a broadcast; only the buttons do.
+- **Go Live** requires YouTube to report the stream `active`. **End Stream** requires the stream to have stopped, which YouTube reports up to a minute after OBS stops — the `stream_stopping` stage.
+- Both gates are re-checked at the moment a button is pressed.
+- Editing a broadcast preserves the settings the add-on does not manage (DVR, latency, embedding, captions).
+
+## Polling
+
+YouTube's API has no push, so the add-on polls — only while a broadcast is selected — in three tiers driven by human presence:
+
+| Tier | When | Cadence |
 | --- | --- | --- |
-| **Preset** | select | Your presets by name; remembers the last one used. Choosing one resets **Date** and **Time** to its **next usual slot that isn't already taken** (if this Sunday 09:30 already has a stream, the Sunday after is offered). |
-| **Date** / **Time** | date · time | Home Assistant's native date and time pickers (MQTT `date` and `time` entities, Home Assistant 2026.5 or newer). |
-| **Schedule** | button | Creates the broadcast at Date + Time with the preset's title (date substituted), description, privacy, stream key and thumbnail. Greyed while no preset is chosen, the preset has no stream key, or Date + Time is in the past. It does **not** change which broadcast the panel is on — pick it from **Broadcast** when you want it. |
+| Idle | nothing happening | `idle_poll_minutes` |
+| Live | broadcast on air | `live_poll_seconds` |
+| Fast | **Fast refresh** window | `fast_poll_seconds` for `fast_mode_minutes` |
 
-Invalid input (an empty title, a title over 100 characters, an unknown option) is rejected and the field snaps back.
+Any interaction with the panel arms the fast window — including a refused button press, which is exactly when a fast answer is wanted. The add-on switches it off when the window expires; the switch is there to arm it by hand. The broadcast list refreshes every `list_poll_minutes`.
 
-### Dashboard cards
+Reads cost 1 quota unit and writes 50 against the API's 10,000/day default. At the defaults a service week uses well under a tenth of it. Actual usage is shown in Google Cloud Console under **APIs & Services → YouTube Data API v3 → Quotas**.
 
-Core Lovelace only — no HACS, no custom cards. Paste into the dashboard editor's YAML mode.
+## Options
 
-**Volunteer card** — thumbnail and title, when it starts, the stage, and only the button that is currently valid:
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `google_client_id`, `google_client_secret` | — | the OAuth client |
+| `external_url` | unset | https base URL forwarding to port 8098; changes the OAuth redirect from `localhost` to `<external_url>/oauth/callback` |
+| `list_poll_minutes` | 5 | broadcast list refresh (1–60) |
+| `fast_poll_seconds` | 3 | fast-window cadence (1–30) |
+| `fast_mode_minutes` | 5 | fast-window length (1–60) |
+| `live_poll_seconds` | 60 | cadence while live (15–600) |
+| `idle_poll_minutes` | 10 | cadence while idle (1–60) |
+| `log_level` | info | debug / info / warn / error |
 
-```yaml
-type: vertical-stack
-cards:
-  - type: picture-entity
-    entity: image.youtube_live_control_thumbnail
-    name: Stream
-    show_state: false
-    show_name: false
-  - type: entities
-    entities:
-      - entity: select.youtube_live_control_broadcast
-      - entity: sensor.youtube_live_control_scheduled_start
-      - entity: sensor.youtube_live_control_stage
-      - entity: binary_sensor.youtube_live_control_encoder
-  - type: conditional
-    conditions:
-      - condition: state
-        entity: sensor.youtube_live_control_stage
-        state: ready_to_go_live
-    card:
-      type: button
-      entity: button.youtube_live_control_go_live
-      name: Go Live
-      icon: mdi:play-circle
-  - type: conditional
-    conditions:
-      - condition: state
-        entity: sensor.youtube_live_control_stage
-        state: ready_to_end
-    card:
-      type: button
-      entity: button.youtube_live_control_end_stream
-      name: End Stream
-      icon: mdi:stop-circle
-  - type: entities
-    entities:
-      - entity: switch.youtube_live_control_fast_mode
-```
+## Storage
 
-The picture is the **Thumbnail** image entity, which is unavailable (and the card blank) while the selected broadcast has no thumbnail.
-
-**Producer card** — schedule, then manage:
-
-```yaml
-type: vertical-stack
-cards:
-  - type: entities
-    title: Schedule
-    entities:
-      - entity: select.youtube_live_scheduling_preset
-      - entity: date.youtube_live_scheduling_date
-      - entity: time.youtube_live_scheduling_time
-      - entity: button.youtube_live_scheduling_schedule
-  - type: entities
-    title: Selected broadcast
-    entities:
-      - entity: select.youtube_live_control_broadcast
-      - entity: text.youtube_live_control_title
-      - entity: select.youtube_live_control_privacy
-      - entity: sensor.youtube_live_control_scheduled_start
-      - entity: sensor.youtube_live_control_stage
-```
-
-## Going live, safely
-
-Everything is **verify → write → read back**; the entities only move when YouTube confirms. State is retained, commands are not, and command replays from the broker are ignored — restarts never start or stop a broadcast.
-
-- Broadcasts are created and saved with `enableAutoStart` and `enableAutoStop` explicitly **false**. OBS starting or stopping never transitions the broadcast; only the buttons do.
-- **Go Live** is available only in stage `ready_to_go_live`: the bound stream's `streamStatus` is `active`, i.e. OBS is actually sending. Start OBS, watch **Stage** go from `waiting_for_encoder` to `ready_to_go_live` (and **Encoder connected** turn on), then press it.
-- **End Stream** is available only in stage `ready_to_end`: live **and** YouTube confirms the stream has stopped. Stop OBS first; YouTube's `streamStatus` lags by up to a minute, during which **Stage** shows `stream_stopping` and the button stays unavailable.
-- Broadcasts created in YouTube Studio with a monitor stream are taken through `testing` automatically on the way to live; broadcasts scheduled by the add-on disable the monitor stream and go live in one step.
-- The gate is re-verified against the API at the moment a button is pressed, not just against the last poll.
-
-## Quota and tiered polling
-
-The YouTube Data API allows 10,000 units/day by default. Reads cost 1; insert/update/bind/transition/thumbnail cost 50 each. Status polling is driven by human presence, not stream state, in three tiers (and only runs while a broadcast is selected):
-
-| Tier | When | Default cadence | Cost |
-| --- | --- | --- | --- |
-| Idle | selected, nothing happening | 10 min | ~288 units/day |
-| Live | broadcast is on air | 60 s | ~180 units/hour |
-| Fast | **Fast refresh** armed | 3 s | ~40 units/minute, window capped at 5 min |
-
-The fast window is armed automatically by **any** interaction with the panel — changing the selection, typing a title, pressing a button (even a refused press: tapping End Stream while YouTube still reports the stream active is exactly the moment you want a fast poll). Each interaction restarts the timer, and the add-on switches it off itself when the window expires — so a dashboard left on Sunday's selection cannot drain Monday's quota. It also self-arms when a Go Live / End Stream transition finishes and when authorization is granted.
-
-Budgeting: the separate list poll costs 2 units per cycle (~576/day at 5 minutes); a full service — schedule, a couple of edits, go live, end, with generous fast-mode use — stays around 500–800 units.
-
-YouTube does not expose remaining quota through its API; actual usage is visible in Google Cloud Console under **APIs & Services → YouTube Data API v3 → Quotas**.
+`/data/ylc.sqlite` holds presets, image records, settings and the Google refresh token; `/data/images/` holds thumbnail files. Home Assistant's add-on backups include both.
 
 ## Troubleshooting
 
-| Symptom | What to check |
+| Symptom | Cause / fix |
 | --- | --- |
-| Entities unavailable, Authorization `unauthorized` | Consent hasn't been given or was revoked. Open the web UI and connect. |
-| Broadcast select has no options although a stream is scheduled | The connection is to a different channel than the one holding the broadcast — check the **Channel** sensor / the web UI header. Reconnect and pick the right channel on Google's chooser. Also check the web UI's *Never started* section: a broadcast scheduled more than a day ago is hidden from the panel. |
-| Google's chooser doesn't list the channel | Your account isn't a manager of that channel's Brand Account (only Studio permissions). See *Which channel?* above. |
-| `Error 400: invalid_request` / "doesn't comply with Google's OAuth 2.0 policy" | The redirect URI is plain `http` to a non-localhost address. Leave `external_url` unset (localhost redirect + paste), or set it to an **https** URL. |
-| `redirect_uri_mismatch` from Google | With `external_url` set, the OAuth client must be a **Web application** with exactly `<external_url>/oauth/callback` registered. With it unset, use a **Desktop app** client. |
-| Browser shows "can't connect" to `localhost:8098` after consenting | Expected when `external_url` is unset — the code is in the address bar. Copy the whole URL and paste it into the form on the web UI. |
-| "Access blocked: … has not completed the Google verification process" | The consent screen is in **Testing** and the signing-in account isn't a test user. Add it under *Test users*, or **Publish app**. |
-| "Google hasn't verified this app" warning | Expected for a published, unverified app. *Advanced → Go to … (unsafe)* continues. |
-| Go Live stays unavailable | Read **Stage**: `waiting_for_encoder` means OBS isn't streaming yet; `no_stream_key` means the broadcast has no stream key — fix it on the broadcast's edit page in the web UI. |
-| End Stream stays unavailable after stopping OBS | Stage `stream_stopping` is expected for up to a minute — `streamStatus` lags. Tap End Stream once (or flip **Fast refresh** on): the refused press arms the fast poll and the button enables as soon as Stage reaches `ready_to_end`. |
-| Schedule button is greyed | No preset chosen, the preset has no stream key (edit it in the web UI), or Date + Time is in the past. |
-| No **Date** / **Time** entities on the scheduling device | The MQTT date and time entities need Home Assistant 2026.5 or newer. |
-| Sensors feel stale | The idle tier polls every 10 minutes. Touch anything on the panel or switch **Fast refresh** on for the 3-second cadence. |
-| `authorization_revoked` in log, Authorization `unauthorized` every week | The consent screen is still in **Testing**, where refresh tokens expire after 7 days. Press **Publish app** on the consent screen, then reconnect once. |
-| `quotaExceeded` errors | Daily quota exhausted; it resets at midnight Pacific. Raise the poll intervals. |
-| `supervisor did not return a usable MQTT service` | Install/start the Mosquitto broker add-on. |
-| `mqtt_disconnected` / `mqtt_connect_error` | Broker is down; the add-on reconnects and republishes on its own. |
+| Entities unavailable; Authorization `unauthorized` | not connected, or Google revoked the token — connect in the web UI |
+| Authorization drops to `unauthorized` weekly | the consent screen is in *Testing*; press **Publish app** and reconnect once |
+| "Access blocked: … has not completed the Google verification process" | the account is not a test user; add it, or publish the app |
+| `Error 400: invalid_request` from Google | `external_url` is set to a plain-http or LAN address; leave it unset or use https |
+| `redirect_uri_mismatch` | with `external_url`: Web client must register `<external_url>/oauth/callback`; without: use a Desktop client |
+| Browser cannot reach `localhost:8098` after consent | expected — paste the URL into the web UI |
+| Google's chooser does not list the channel | the account is not a Brand Account manager of it |
+| Broadcast select is empty although a stream is scheduled | wrong channel (check **Channel**), or the broadcast is under *Never started* in the web UI |
+| Go Live unavailable | read **Stage**: `waiting_for_encoder` — OBS not sending; `no_stream_key` — fix in the web UI |
+| End Stream unavailable after stopping OBS | `stream_stopping` for up to a minute; a tap on End Stream arms fast polling |
+| Schedule greyed | no preset, preset without stream key, or past date/time |
+| Date / Time entities missing | Home Assistant older than 2026.5 |
+| `quotaExceeded` in the log | daily quota spent; resets midnight Pacific; raise the poll intervals |
+| `supervisor did not return a usable MQTT service` | start the Mosquitto broker add-on |

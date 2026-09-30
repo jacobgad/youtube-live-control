@@ -1,5 +1,4 @@
-// Package config loads add-on options from /data/options.json and the MQTT broker
-// details from either the environment or the Home Assistant Supervisor.
+// Package config loads add-on options and the MQTT broker details.
 package config
 
 import (
@@ -29,8 +28,7 @@ type Options struct {
 	LogLevel           slog.Level
 }
 
-// String renders the options without the client secret, so formatting an Options
-// value (or any struct containing one) can never leak the credential into logs.
+// String omits the client secret so no fmt path can leak it.
 func (o Options) String() string {
 	return fmt.Sprintf("Options{clientID=%s externalURL=%s listPoll=%s fastPoll=%s fastMode=%s livePoll=%s idlePoll=%s logLevel=%s}",
 		o.GoogleClientID, o.ExternalURL, o.ListPollInterval, o.FastPollInterval, o.FastModeDuration, o.LivePollInterval, o.IdlePollInterval, o.LogLevel)
@@ -39,7 +37,7 @@ func (o Options) String() string {
 // GoString mirrors String for %#v, which bypasses Stringer.
 func (o Options) GoString() string { return o.String() }
 
-// LogValue renders the options for slog without the client secret.
+// LogValue mirrors String for slog.
 func (o Options) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.String("clientID", o.GoogleClientID),
@@ -62,8 +60,7 @@ type MQTT struct {
 	TLS      bool
 }
 
-// String renders the broker address without the password, so formatting an MQTT
-// value (or any struct containing one) can never leak the credential into logs.
+// String omits the password so no fmt path can leak it.
 func (m MQTT) String() string {
 	return fmt.Sprintf("mqtt://%s@%s:%d tls=%v", m.Username, m.Host, m.Port, m.TLS)
 }
@@ -71,7 +68,7 @@ func (m MQTT) String() string {
 // GoString mirrors String for %#v, which bypasses Stringer.
 func (m MQTT) GoString() string { return m.String() }
 
-// LogValue renders the broker details for slog without the password.
+// LogValue mirrors String for slog.
 func (m MQTT) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.String("host", m.Host),
@@ -110,9 +107,8 @@ type intervalOption struct {
 	value *time.Duration
 }
 
-// ParseOptions validates the JSON contents of options.json and applies defaults.
-// An empty Google client is allowed so the add-on can start and walk the user
-// through OAuth setup in the ingress UI instead of crash-looping.
+// ParseOptions validates options.json and applies defaults. An empty Google client is
+// allowed so the add-on can start and walk the user through setup instead of crash-looping.
 func ParseOptions(data []byte) (Options, error) {
 	var raw rawOptions
 	if err := json.Unmarshal(data, &raw); err != nil {
@@ -182,8 +178,7 @@ func MQTTFromEnv(getenv func(string) string) (MQTT, error) {
 
 const supervisorServicesURL = "http://supervisor/services/mqtt"
 
-// MQTTFromSupervisor fetches the broker registered with the Supervisor services API,
-// which is reachable without hassio_api once the add-on declares the mqtt service.
+// MQTTFromSupervisor fetches the broker from the Supervisor services API.
 func MQTTFromSupervisor(ctx context.Context, token string, client *http.Client) (MQTT, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, supervisorServicesURL, nil)
 	if err != nil {

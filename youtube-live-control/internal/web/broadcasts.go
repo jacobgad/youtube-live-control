@@ -10,6 +10,7 @@ import (
 
 	"github.com/jacobgad/youtube-live-control/internal/controller"
 	"github.com/jacobgad/youtube-live-control/internal/preset"
+	"github.com/jacobgad/youtube-live-control/internal/store"
 	"github.com/jacobgad/youtube-live-control/internal/youtube"
 )
 
@@ -31,17 +32,18 @@ func (s *Server) handleBroadcasts(w http.ResponseWriter, r *http.Request) {
 }
 
 type broadcastForm struct {
-	ID             string
-	PresetID       string
-	Title          string
-	Description    string
-	Start          time.Time
-	Privacy        string
-	StreamID       string
-	ThumbnailURL   string
-	Streams        []youtube.Stream
-	Lifecycle      string
-	HasPresetThumb bool
+	ID           string
+	PresetID     string
+	Title        string
+	Description  string
+	Start        time.Time
+	Privacy      string
+	StreamID     string
+	ThumbnailURL string
+	Streams      []youtube.Stream
+	Lifecycle    string
+	Images       []store.Image
+	ImageID      string
 }
 
 func (s *Server) handleNewBroadcastForm(w http.ResponseWriter, r *http.Request) {
@@ -54,15 +56,16 @@ func (s *Server) handleNewBroadcastForm(w http.ResponseWriter, r *http.Request) 
 	}
 	start := p.NextStart(time.Now())
 	form := broadcastForm{
-		PresetID:       p.ID,
-		Title:          p.Title(start),
-		Description:    p.Description,
-		Start:          start,
-		Privacy:        p.Privacy,
-		StreamID:       p.StreamID,
-		HasPresetThumb: p.ThumbnailFile != "",
+		PresetID:    p.ID,
+		Title:       p.Title(start),
+		Description: p.Description,
+		Start:       start,
+		Privacy:     p.Privacy,
+		StreamID:    p.StreamID,
+		ImageID:     p.ImageID,
 	}
 	form.Streams = s.streams(ctx)
+	form.Images = s.images(ctx)
 	s.render(w, r, "broadcast_form", "New broadcast", form, "")
 }
 
@@ -70,19 +73,17 @@ func (s *Server) handleNewBroadcast(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := requestContext(r)
 	defer cancel()
 	form, image, contentType, err := s.parseBroadcastForm(r)
+	if err == nil && image == nil && form.ImageID != "" {
+		image, contentType, err = s.store.ImageBytes(ctx, form.ImageID)
+	}
 	if err != nil {
-		form.Streams = s.streams(ctx)
+		form.Streams, form.Images = s.streams(ctx), s.images(ctx)
 		s.render(w, r, "broadcast_form", "New broadcast", form, err.Error())
 		return
 	}
-	if image == nil && form.PresetID != "" {
-		if data, ct, ok, err := s.store.Thumbnail(ctx, form.PresetID); err == nil && ok {
-			image, contentType = data, ct
-		}
-	}
 	created, err := s.ctrl.Create(ctx, controller.NewBroadcast{Edit: form.edit(), Thumbnail: image, ThumbnailType: contentType})
 	if err != nil {
-		form.Streams = s.streams(ctx)
+		form.Streams, form.Images = s.streams(ctx), s.images(ctx)
 		s.render(w, r, "broadcast_form", "New broadcast", form, err.Error())
 		return
 	}
@@ -108,6 +109,7 @@ func (s *Server) handleEditBroadcastForm(w http.ResponseWriter, r *http.Request)
 		Lifecycle:    b.LifeCycleStatus,
 	}
 	form.Streams = s.streams(ctx)
+	form.Images = s.images(ctx)
 	s.render(w, r, "broadcast_form", "Edit broadcast", form, "")
 }
 
@@ -117,6 +119,9 @@ func (s *Server) handleEditBroadcast(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	form, image, contentType, err := s.parseBroadcastForm(r)
 	form.ID = id
+	if err == nil && image == nil && form.ImageID != "" {
+		image, contentType, err = s.store.ImageBytes(ctx, form.ImageID)
+	}
 	if err == nil {
 		_, err = s.ctrl.Update(ctx, id, form.edit())
 	}
@@ -124,7 +129,7 @@ func (s *Server) handleEditBroadcast(w http.ResponseWriter, r *http.Request) {
 		err = s.ctrl.SetThumbnail(ctx, id, contentType, image)
 	}
 	if err != nil {
-		form.Streams = s.streams(ctx)
+		form.Streams, form.Images = s.streams(ctx), s.images(ctx)
 		s.render(w, r, "broadcast_form", "Edit broadcast", form, err.Error())
 		return
 	}
@@ -161,6 +166,7 @@ func (s *Server) parseBroadcastForm(r *http.Request) (broadcastForm, []byte, str
 		Description: r.FormValue("description"),
 		Privacy:     r.FormValue("privacy"),
 		StreamID:    r.FormValue("stream_id"),
+		ImageID:     r.FormValue("image_id"),
 	}
 	if raw := r.FormValue("start"); raw != "" {
 		start, err := time.ParseInLocation(inputTimeLayout, raw, time.Local)

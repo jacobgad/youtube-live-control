@@ -52,11 +52,10 @@
 </div>
 
 <div class="field">
-<label for="thumbnail">Thumbnail</label>
-{{if .Preset.ThumbnailFile}}<img class="thumb large" src="{{$.Base}}/presets/{{.Preset.ID}}/thumbnail" alt="Preset thumbnail">{{end}}
-<input type="file" id="thumbnail" name="thumbnail" accept="image/jpeg,image/png">
-<p class="hint">JPEG or PNG, up to 2 MB, ideally 1280×720. Uploaded to every broadcast scheduled from this preset.</p>
+<label>Thumbnail</label>
+<p class="hint">Uploaded to every broadcast scheduled from this preset.</p>
 </div>
+{{template "picker" (picker $.Base .Images .Preset.ImageID false)}}
 
 <div class="actions">
 <button type="submit" class="primary">Save preset</button>

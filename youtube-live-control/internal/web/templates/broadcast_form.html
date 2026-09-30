@@ -42,12 +42,10 @@
 </div>
 
 <div class="field">
-<label for="thumbnail">Thumbnail</label>
+<label>Thumbnail</label>
 {{if .ThumbnailURL}}<img class="thumb large" src="{{.ThumbnailURL}}" alt="Current thumbnail">{{end}}
-{{if and (not .ID) .HasPresetThumb}}<img class="thumb large" src="{{$.Base}}/presets/{{.PresetID}}/thumbnail" alt="Preset thumbnail"><p class="hint">From the preset; choose a file to use a different one.</p>{{end}}
-<input type="file" id="thumbnail" name="thumbnail" accept="image/jpeg,image/png">
-<p class="hint">JPEG or PNG, up to 2 MB, ideally 1280×720.</p>
 </div>
+{{template "picker" (picker $.Base .Images .ImageID (ne .ID ""))}}
 
 <div class="actions">
 <button type="submit" class="primary">{{if .ID}}Save{{else}}Schedule{{end}}</button>

@@ -1,5 +1,4 @@
-// Package web serves the ingress console — Google consent, the broadcast editor and
-// preset management — plus the plain-port OAuth callback Google can redirect to.
+// Package web serves the ingress console and the OAuth callback port.
 package web
 
 import (
@@ -11,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -37,7 +37,7 @@ const (
 //go:embed templates/*.html
 var templateFS embed.FS
 
-// Server is the ingress UI plus the OAuth callback listener.
+// Server is the ingress UI and the OAuth callback listener.
 type Server struct {
 	auth  *youtube.Auth
 	ctrl  *controller.Controller
@@ -55,7 +55,7 @@ type stateEntry struct {
 	expires     time.Time
 }
 
-// New builds the server; Run starts it.
+// New builds the server.
 func New(auth *youtube.Auth, ctrl *controller.Controller, st *store.Store, opts config.Options, log *slog.Logger) *Server {
 	if log == nil {
 		log = slog.Default()
@@ -88,6 +88,10 @@ func parsePages() map[string]*template.Template {
 		"weekdays": func() []time.Weekday {
 			return []time.Weekday{time.Sunday, time.Monday, time.Tuesday, time.Wednesday, time.Thursday, time.Friday, time.Saturday}
 		},
+		"picker": func(base string, images []store.Image, selected string, keep bool) pickerData {
+			return pickerData{Base: base, Images: images, Selected: selected, Keep: keep}
+		},
+		"kb": func(size int64) string { return strconv.FormatInt((size+1023)/1024, 10) + " KB" },
 		"keySuffix": func(key string) string {
 			if len(key) <= 4 {
 				return key
@@ -95,9 +99,9 @@ func parsePages() map[string]*template.Template {
 			return "…" + key[len(key)-4:]
 		},
 	}
-	layout := template.Must(template.New("layout").Funcs(funcs).ParseFS(templateFS, "templates/layout.html"))
+	layout := template.Must(template.New("layout").Funcs(funcs).ParseFS(templateFS, "templates/layout.html", "templates/_picker.html"))
 	pages := map[string]*template.Template{}
-	for _, name := range []string{"connection", "broadcasts", "broadcast_form", "presets", "preset_form"} {
+	for _, name := range []string{"connection", "broadcasts", "broadcast_form", "presets", "preset_form", "images"} {
 		clone := template.Must(layout.Clone())
 		pages[name] = template.Must(clone.ParseFS(templateFS, "templates/"+name+".html"))
 	}
@@ -123,7 +127,10 @@ func (s *Server) Run(ctx context.Context) error {
 	ingressMux.HandleFunc("POST /presets/{id}", s.requireAuth(s.handleSavePreset))
 	ingressMux.HandleFunc("POST /presets/{id}/delete", s.requireAuth(s.handleDeletePreset))
 	ingressMux.HandleFunc("POST /presets/{id}/duplicate", s.requireAuth(s.handleDuplicatePreset))
-	ingressMux.HandleFunc("GET /presets/{id}/thumbnail", s.handlePresetThumbnail)
+	ingressMux.HandleFunc("GET /images", s.requireAuth(s.handleImages))
+	ingressMux.HandleFunc("POST /images", s.requireAuth(s.handleUploadImage))
+	ingressMux.HandleFunc("POST /images/{id}/delete", s.requireAuth(s.handleDeleteImage))
+	ingressMux.HandleFunc("GET /images/{id}", s.handleImage)
 
 	callbackMux := http.NewServeMux()
 	callbackMux.HandleFunc("GET /oauth/callback", s.handleCallback)
@@ -180,6 +187,14 @@ func (s *Server) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		next(w, r)
 	}
+}
+
+// Keep is offered only when editing a broadcast, whose YouTube thumbnail may stay as is.
+type pickerData struct {
+	Base     string
+	Images   []store.Image
+	Selected string
+	Keep     bool
 }
 
 type page struct {
