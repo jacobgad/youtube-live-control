@@ -5,46 +5,62 @@
 <input type="hidden" name="preset_id" value="{{.PresetID}}">
 {{if .Lifecycle}}<p><span class="badge">{{.Lifecycle}}</span></p>{{end}}
 
+<div class="field">
 <label for="title">Title</label>
 <input type="text" id="title" name="title" value="{{.Title}}" maxlength="100" required>
+</div>
 
+<div class="field">
 <label for="description">Description</label>
 <textarea id="description" name="description" maxlength="5000">{{.Description}}</textarea>
+</div>
 
 <div class="row">
-<div class="grow">
+<div class="field">
 <label for="start">Scheduled start</label>
 <input type="datetime-local" id="start" name="start" value="{{inputTime .Start}}" step="1800" required>
-<p class="muted">On the hour or half hour.</p>
+<p class="hint">On the hour or half hour.</p>
 </div>
-<div class="grow">
+<div class="field">
 <label for="privacy">Privacy</label>
 <select id="privacy" name="privacy">
 <option value="public" {{if eq .Privacy "public"}}selected{{end}}>Public</option>
 <option value="unlisted" {{if eq .Privacy "unlisted"}}selected{{end}}>Unlisted</option>
 <option value="private" {{if eq .Privacy "private"}}selected{{end}}>Private</option>
 </select>
+<p class="hint">&nbsp;</p>
 </div>
 </div>
 
+<div class="field">
 <label for="stream_id">Stream key</label>
 <select id="stream_id" name="stream_id" {{if not .ID}}required{{end}}>
 {{if .ID}}<option value="" {{if not .StreamID}}selected{{end}}>{{if .StreamID}}Keep current{{else}}— none bound —{{end}}</option>{{end}}
 {{range .Streams}}<option value="{{.ID}}" {{if eq .ID $.Data.StreamID}}selected{{end}}>{{.Title}} · {{.Resolution}}{{if .FrameRate}} {{.FrameRate}}{{end}} · key {{keySuffix .StreamKey}}</option>{{end}}
 </select>
-<p class="muted">The stream key OBS is configured with. A broadcast without one can never go live.</p>
+<p class="hint">The stream key OBS is configured with. A broadcast without one can never go live.</p>
+</div>
 
+<div class="field">
 <label for="thumbnail">Thumbnail</label>
-{{if .ThumbnailURL}}<img class="thumb" src="{{.ThumbnailURL}}" alt="Current thumbnail">{{end}}
-{{if and (not .ID) .HasPresetThumb}}<img class="thumb" src="{{$.Base}}/presets/{{.PresetID}}/thumbnail" alt="Preset thumbnail"><p class="muted">From the preset; choose a file to use a different one.</p>{{end}}
+{{if .ThumbnailURL}}<img class="thumb large" src="{{.ThumbnailURL}}" alt="Current thumbnail">{{end}}
+{{if and (not .ID) .HasPresetThumb}}<img class="thumb large" src="{{$.Base}}/presets/{{.PresetID}}/thumbnail" alt="Preset thumbnail"><p class="hint">From the preset; choose a file to use a different one.</p>{{end}}
 <input type="file" id="thumbnail" name="thumbnail" accept="image/jpeg,image/png">
-<p class="muted">JPEG or PNG, up to 2 MB, ideally 1280×720.</p>
+<p class="hint">JPEG or PNG, up to 2 MB, ideally 1280×720.</p>
+</div>
 
 <div class="actions">
 <button type="submit" class="primary">{{if .ID}}Save{{else}}Schedule{{end}}</button>
 <a class="button quiet" href="{{$.Base}}/broadcasts">Cancel</a>
+{{if .ID}}
+<span class="spacer"></span>
+<button type="submit" class="danger" form="delete-{{.ID}}">Delete</button>
+{{end}}
 </div>
 </form>
+{{if .ID}}
+<form id="delete-{{.ID}}" method="post" action="{{$.Base}}/broadcasts/{{.ID}}/delete" onsubmit="return confirm('Delete “{{.Title}}” from YouTube? This cannot be undone.');"></form>
+{{end}}
 </div>
 {{end}}
 {{end}}

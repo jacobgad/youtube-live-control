@@ -60,7 +60,7 @@ Configuration lives here; the MQTT devices are for scheduling and operating; pre
 
 ## The web UI (prepare)
 
-Open it from the add-on's Info tab or the sidebar. It is restricted to Home Assistant admins.
+Open it from the add-on's Info tab or the sidebar. It is restricted to Home Assistant admins and is dark-themed only.
 
 **Presets** — a preset is everything a regular service needs, so scheduling is "pick preset, confirm date":
 
@@ -76,10 +76,10 @@ Open it from the add-on's Info tab or the sidebar. It is restricted to Home Assi
 
 Presets are stored in `/data/presets/`.
 
-**Broadcasts** — lists upcoming and live broadcasts (with the one currently on the Home Assistant panel marked), and *Never started* ones — scheduled more than a day ago and still `ready`, hidden from the panel; delete those in Studio.
+**Broadcasts** — lists upcoming and live broadcasts (with the one currently on the Home Assistant panel marked), and *Never started* ones — scheduled more than a day ago and still `ready`, hidden from the panel, with a **Delete** button to clean them up.
 
 - **Schedule a new stream** (the same thing the dashboard's Schedule button does, with a full form): choose a preset → the form is pre-filled → adjust anything, including an off-pattern date → **Schedule**. The add-on creates the broadcast with `enableAutoStart`/`enableAutoStop` off, binds the stream key, uploads the thumbnail and reads it back. It does not change the panel's selection.
-- **Edit** any broadcast: title, description, date-time (native picker; a changed time must be on the half hour, an untouched Studio time is kept as is), privacy, stream key (fix a Studio-made broadcast that shows *no stream key*), replace the thumbnail.
+- **Edit** any broadcast: title, description, date-time (native picker; a changed time must be on the half hour, an untouched Studio time is kept as is), privacy, stream key (fix a Studio-made broadcast that shows *no stream key*), replace the thumbnail — or **Delete** it (asks for confirmation; a live broadcast must be ended first).
 
 Every action goes through the same verified write → read back path as the panel, so the Home Assistant entities update the moment YouTube confirms.
 

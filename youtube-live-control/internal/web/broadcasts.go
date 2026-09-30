@@ -129,6 +129,21 @@ func (s *Server) handleEditBroadcast(w http.ResponseWriter, r *http.Request) {
 	s.redirect(w, r, "/broadcasts", "notice", "Saved “"+strings.TrimSpace(form.Title)+"”.")
 }
 
+func (s *Server) handleDeleteBroadcast(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := requestContext(r)
+	defer cancel()
+	id := r.PathValue("id")
+	title := id
+	if b, ok := s.ctrl.Broadcast(ctx, id); ok {
+		title = b.Title
+	}
+	if err := s.ctrl.Delete(ctx, id); err != nil {
+		s.redirect(w, r, "/broadcasts", "error", "Could not delete “"+title+"”: "+err.Error())
+		return
+	}
+	s.redirect(w, r, "/broadcasts", "notice", "Deleted “"+title+"”.")
+}
+
 func (f broadcastForm) edit() controller.Edit {
 	return controller.Edit{Title: f.Title, Description: f.Description, Start: f.Start, Privacy: f.Privacy, StreamID: f.StreamID}
 }

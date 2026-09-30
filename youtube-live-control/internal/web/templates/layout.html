@@ -3,41 +3,76 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>{{.Title}} · YouTube Live Control</title>
 <style>
-:root { color-scheme: light dark; }
-body { font-family: -apple-system, system-ui, sans-serif; margin: 0; color: #1c1c1e; background: #f7f7f9; }
-@media (prefers-color-scheme: dark) { body { color: #f2f2f7; background: #111; } .card, input, textarea, select { background: #1c1c1e; color: #f2f2f7; border-color: #3a3a3c; } code { background: #2c2c2e; } }
-header { display: flex; align-items: center; gap: 1rem; padding: 0.8rem 1.2rem; border-bottom: 1px solid #d1d1d6; flex-wrap: wrap; }
+:root {
+  color-scheme: dark;
+  --bg: #111214; --card: #1c1d21; --line: #2f3137; --input: #26282e;
+  --text: #f2f2f7; --muted: #9a9aa3; --accent: #e5484d; --accent-text: #fff;
+  --ok-bg: #163a25; --ok-text: #7ee2a0; --warn-bg: #45300e; --warn-text: #ffc866;
+  --bad-bg: #4a1d1f; --bad-text: #ff9c98; --chip-bg: #2c2e35; --chip-text: #d4d4dc;
+}
+* { box-sizing: border-box; }
+body { font-family: -apple-system, system-ui, sans-serif; margin: 0; color: var(--text); background: var(--bg); line-height: 1.4; }
+a { color: inherit; }
+header { display: flex; align-items: center; gap: 1rem; padding: 0.8rem 1.2rem; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
 header h1 { font-size: 1.1rem; margin: 0; }
-header .channel { color: #8e8e93; font-size: 0.9rem; }
+header .channel { color: var(--muted); font-size: 0.9rem; }
 nav { margin-left: auto; display: flex; gap: 0.3rem; }
-nav a { padding: 0.4rem 0.8rem; border-radius: 999px; text-decoration: none; color: inherit; }
-nav a.active { background: #c00; color: #fff; }
-main { max-width: 52rem; margin: 1.2rem auto; padding: 0 1rem; }
+nav a { padding: 0.4rem 0.8rem; border-radius: 999px; text-decoration: none; }
+nav a.active { background: var(--accent); color: var(--accent-text); }
+main { max-width: 52rem; margin: 1.2rem auto; padding: 0 1rem 3rem; }
 h2 { font-size: 1.05rem; margin: 1.6rem 0 0.6rem; }
-.card { background: #fff; border: 1px solid #d1d1d6; border-radius: 10px; padding: 1rem 1.2rem; margin-bottom: 1rem; }
-.row { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
-.row .grow { flex: 1 1 14rem; }
-.muted { color: #8e8e93; }
-.stale { opacity: 0.6; }
-.badge { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.8rem; font-weight: 600; background: #e5e5ea; color: #3a3a3c; }
-.badge.live { background: #fdd8d6; color: #b3261e; }
-.badge.selected { background: #d1f2d9; color: #1d7a36; }
-.badge.warn { background: #fde3c9; color: #ad5700; }
-.error { background: #fdd8d6; color: #b3261e; padding: 0.7rem 1rem; border-radius: 8px; margin-bottom: 1rem; }
-.notice { background: #d1f2d9; color: #1d7a36; padding: 0.7rem 1rem; border-radius: 8px; margin-bottom: 1rem; }
-label { display: block; font-size: 0.85rem; font-weight: 600; margin: 0.8rem 0 0.25rem; }
-input[type=text], input[type=datetime-local], input[type=time], textarea, select { width: 100%; padding: 0.55rem; border: 1px solid #c7c7cc; border-radius: 6px; box-sizing: border-box; font: inherit; }
-textarea { min-height: 7rem; }
-.button, button { display: inline-block; padding: 0.55rem 1.1rem; border: 0; border-radius: 8px; background: #1c1c1e; color: #fff; font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
-.button.primary, button.primary { background: #c00; }
-.button.quiet, button.quiet { background: transparent; color: inherit; border: 1px solid #c7c7cc; }
-.actions { display: flex; gap: 0.6rem; margin-top: 1.2rem; flex-wrap: wrap; align-items: center; }
-img.thumb { max-width: 16rem; border-radius: 6px; display: block; margin-top: 0.4rem; }
-code { background: #f2f2f7; padding: 0.15rem 0.4rem; border-radius: 4px; word-break: break-all; }
+p { margin: 0.6rem 0; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.2rem; margin-bottom: 1rem; }
+.muted { color: var(--muted); }
+.hint { color: var(--muted); font-size: 0.85rem; margin: 0.3rem 0 0; }
+.stale { opacity: 0.55; }
+
+/* Forms: every control lives in a .field (label / control / hint) and fields sit in a
+   .row grid aligned to the top, so hints never push neighbours out of line. A .row.end
+   aligns to the bottom for a control-plus-button pair. */
+.field { display: flex; flex-direction: column; gap: 0.3rem; margin: 0.9rem 0 0; min-width: 0; }
+.field > label { font-size: 0.85rem; font-weight: 600; color: var(--text); }
+.row { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 0 1rem; align-items: start; }
+.row.end { grid-template-columns: 1fr auto; align-items: end; }
+.row.end .field, .row .field { margin-top: 0.9rem; }
+.row.end > .button, .row.end > button { margin-top: 0.9rem; margin-bottom: 0; }
+input[type=text], input[type=datetime-local], input[type=time], textarea, select {
+  width: 100%; padding: 0.55rem 0.65rem; border: 1px solid var(--line); border-radius: 6px;
+  background: var(--input); color: var(--text); font: inherit; min-height: 2.6rem;
+}
+input[type=file] { color: var(--muted); font: inherit; padding: 0.3rem 0; }
+textarea { min-height: 7rem; resize: vertical; }
+select { appearance: auto; }
+input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.button, button { display: inline-flex; align-items: center; justify-content: center; min-height: 2.6rem; padding: 0 1.1rem; border: 1px solid transparent; border-radius: 8px; background: var(--chip-bg); color: var(--text); font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; white-space: nowrap; }
+.button.primary, button.primary { background: var(--accent); color: var(--accent-text); }
+.button.quiet, button.quiet { background: transparent; border-color: var(--line); }
+.button.danger, button.danger { background: transparent; border-color: var(--bad-text); color: var(--bad-text); }
+button[disabled] { opacity: 0.45; cursor: default; }
+.actions { display: flex; gap: 0.6rem; margin-top: 1.4rem; flex-wrap: wrap; align-items: center; }
+.actions .spacer { flex: 1; }
+
+.badge { display: inline-block; padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.8rem; font-weight: 600; background: var(--chip-bg); color: var(--chip-text); white-space: nowrap; }
+.badge.live { background: var(--bad-bg); color: var(--bad-text); }
+.badge.ok { background: var(--ok-bg); color: var(--ok-text); }
+.badge.warn { background: var(--warn-bg); color: var(--warn-text); }
+.error { background: var(--bad-bg); color: var(--bad-text); padding: 0.7rem 1rem; border-radius: 8px; margin-bottom: 1rem; }
+.notice { background: var(--ok-bg); color: var(--ok-text); padding: 0.7rem 1rem; border-radius: 8px; margin-bottom: 1rem; }
+
+/* Lists: one grid per item — thumbnail | text | badges/actions — vertically centred. */
+.item { display: grid; grid-template-columns: auto 1fr auto; gap: 1rem; align-items: center; }
+.item.no-thumb { grid-template-columns: 1fr auto; }
+.item .meta { color: var(--muted); font-size: 0.9rem; margin-top: 0.15rem; }
+.item .side { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+img.thumb { width: 8rem; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 6px; display: block; background: var(--input); }
+img.thumb.large { width: 100%; max-width: 20rem; }
+code { background: var(--input); padding: 0.15rem 0.4rem; border-radius: 4px; word-break: break-all; }
 ol li { margin-bottom: 0.4rem; }
-form.inline { display: inline; }
+form.inline { display: inline; margin: 0; }
 </style>
 </head>
 <body>
@@ -46,8 +81,8 @@ form.inline { display: inline; }
 {{if .Channel}}<span class="channel">{{.Channel}}</span>{{end}}
 <nav>
 {{if .Authorized}}
-<a href="{{.Base}}/broadcasts" {{if eq .Tab "broadcasts" "broadcast_form"}}class="active"{{end}}>Broadcasts</a>
-<a href="{{.Base}}/presets" {{if eq .Tab "presets" "preset_form"}}class="active"{{end}}>Presets</a>
+<a href="{{.Base}}/broadcasts" {{if or (eq .Tab "broadcasts") (eq .Tab "broadcast_form")}}class="active"{{end}}>Broadcasts</a>
+<a href="{{.Base}}/presets" {{if or (eq .Tab "presets") (eq .Tab "preset_form")}}class="active"{{end}}>Presets</a>
 {{end}}
 <a href="{{.Base}}/connection" {{if eq .Tab "connection"}}class="active"{{end}}>Connection</a>
 </nav>

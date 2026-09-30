@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.1
+
+- Web UI: **Delete** for broadcasts (edit page and the *Never started* list, with confirmation; live broadcasts must be ended first).
+- Web UI is dark-only with one hard-coded palette; forms use a label / control / hint grid so hints no longer push neighbouring controls out of alignment.
+
 ## 1.2.0
 
 Schedule from the dashboard, operate from the dashboard; set up in the web UI.

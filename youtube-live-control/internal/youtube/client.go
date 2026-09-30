@@ -311,6 +311,11 @@ func (c *Client) UpdateBroadcast(ctx context.Context, b Broadcast) (Broadcast, e
 	return out.broadcast(), nil
 }
 
+// DeleteBroadcast removes a broadcast (and its video). Costs 50 quota units.
+func (c *Client) DeleteBroadcast(ctx context.Context, id string) error {
+	return c.do(ctx, http.MethodDelete, apiBase+"/liveBroadcasts", url.Values{"id": {id}}, nil, nil)
+}
+
 // Transition moves a broadcast to testing, live or complete. Costs 50 quota units.
 func (c *Client) Transition(ctx context.Context, id, broadcastStatus string) error {
 	return c.do(ctx, http.MethodPost, apiBase+"/liveBroadcasts/transition", url.Values{

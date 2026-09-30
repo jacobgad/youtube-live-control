@@ -14,8 +14,8 @@
 {{else}}
 <div class="card">
 {{if $.Authorized}}
-<p><span class="badge selected">Connected</span>{{if $.Channel}} to channel <strong>{{$.Channel}}</strong>{{end}} — the add-on manages this channel's live broadcasts.</p>
-<p class="muted">Wrong channel? Google's account chooser lists the channels (Brand Accounts) your account manages;
+<p><span class="badge ok">Connected</span>{{if $.Channel}} to channel <strong>{{$.Channel}}</strong>{{end}} — the add-on manages this channel's live broadcasts.</p>
+<p class="hint">Wrong channel? Google's account chooser lists the channels (Brand Accounts) your account manages;
 connect again below and pick the channel, not the account. A channel shared with you only through
 YouTube Studio permissions cannot be chosen — its owner must add you as a Brand Account manager or connect themselves.</p>
 {{else}}
@@ -50,11 +50,14 @@ without registration. <span class="muted">(Redirect URI in use: <code>{{.Redirec
 unless this browser is running on the Home Assistant machine. <strong>That is expected</strong> — the
 consent succeeded and the code is in that tab's address bar. Copy the whole URL and paste it here:</p>
 {{end}}
-<form method="post" action="{{$.Base}}/manual">
-<input type="text" name="response" placeholder="http://localhost:8098/oauth/callback?state=…&code=…" autocomplete="off">
-<div class="actions"><button type="submit">Finish connection</button></div>
+<form method="post" action="{{$.Base}}/manual" class="row end">
+<div class="field">
+<label for="response">Redirect URL</label>
+<input type="text" id="response" name="response" placeholder="http://localhost:8098/oauth/callback?state=…&code=…" autocomplete="off">
+</div>
+<button type="submit" class="primary">Finish connection</button>
 </form>
-<p class="muted">Have a public https hostname that forwards to this add-on's port 8098? Set the <code>external_url</code>
+<p class="hint">Have a public https hostname that forwards to this add-on's port 8098? Set the <code>external_url</code>
 option and the redirect completes automatically instead.</p>
 </div>
 {{end}}

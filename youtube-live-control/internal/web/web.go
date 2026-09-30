@@ -115,6 +115,7 @@ func (s *Server) Run(ctx context.Context) error {
 	ingressMux.HandleFunc("POST /broadcasts/new", s.requireAuth(s.handleNewBroadcast))
 	ingressMux.HandleFunc("GET /broadcasts/{id}", s.requireAuth(s.handleEditBroadcastForm))
 	ingressMux.HandleFunc("POST /broadcasts/{id}", s.requireAuth(s.handleEditBroadcast))
+	ingressMux.HandleFunc("POST /broadcasts/{id}/delete", s.requireAuth(s.handleDeleteBroadcast))
 	ingressMux.HandleFunc("GET /presets", s.requireAuth(s.handlePresets))
 	ingressMux.HandleFunc("GET /presets/new", s.requireAuth(s.handlePresetForm))
 	ingressMux.HandleFunc("POST /presets/new", s.requireAuth(s.handleSavePreset))
