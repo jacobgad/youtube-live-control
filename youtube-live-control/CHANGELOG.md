@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.2
+
+- Scheduling device: **Date** and **Time** are two entities again — Home Assistant's native `date` and `time` pickers (MQTT platforms, 2026.5+) — because the combined `datetime` entity does not render well in cards. Still any minute; the retired `datetime` config is cleared on start.
+
 ## 1.3.1
 
 - Web UI: **Duplicate** a preset (copies the thumbnail too) and land on the copy's edit page.

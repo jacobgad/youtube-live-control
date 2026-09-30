@@ -108,7 +108,8 @@ func New(deps Deps) *Controller {
 		GoLivePressed:     func() { c.pressed("go_live", c.goLive) },
 		EndPressed:        func() { c.pressed("end_stream", c.endStream) },
 		PresetSelected:    c.selectPreset,
-		StartEntered:      c.enterStart,
+		DateEntered:       c.enterDate,
+		TimeEntered:       c.enterTime,
 		SchedulePressed:   c.schedulePressed,
 		HomeAssistantOnline: func() {
 			c.background(func(ctx context.Context) { c.pub.everything(ctx, c.snapshot) })
@@ -318,7 +319,8 @@ func (c *Controller) snapshot() snapshot {
 		fastRemaining: c.session.fastRemainingMinutes(now),
 		gates:         computeGates(c.session.authorized, current),
 		presetLabel:   c.session.sched.presetLabel(),
-		start:         c.session.sched.startPayload(),
+		date:          c.session.sched.datePayload(),
+		timeOfDay:     c.session.sched.timePayload(),
 		canSchedule:   c.session.authorized && c.session.sched.canSchedule(now),
 	}
 	if b != nil {
@@ -465,15 +467,28 @@ func (c *Controller) selectPreset(label string) {
 	c.publishUpdate()
 }
 
-func (c *Controller) enterStart(raw string) {
-	start, err := parseStart(raw)
+func (c *Controller) enterDate(raw string) {
+	day, err := parseDate(raw)
 	if err != nil {
-		c.log.Warn("start_rejected", "payload", raw, "error", err.Error())
-		c.snapBack(mqtt.StartState)
+		c.log.Warn("date_rejected", "payload", raw, "error", err.Error())
+		c.snapBack(mqtt.DateState)
 		return
 	}
 	c.mu.Lock()
-	c.session.sched.start = start
+	c.session.sched.date = day
+	c.mu.Unlock()
+	c.publishUpdate()
+}
+
+func (c *Controller) enterTime(raw string) {
+	tod, err := parseTimeOfDay(raw)
+	if err != nil {
+		c.log.Warn("time_rejected", "payload", raw, "error", err.Error())
+		c.snapBack(mqtt.TimeState)
+		return
+	}
+	c.mu.Lock()
+	c.session.sched.timeOfDay, c.session.sched.timeSet = tod, true
 	c.mu.Unlock()
 	c.publishUpdate()
 }
@@ -482,7 +497,7 @@ func (c *Controller) enterStart(raw string) {
 func (c *Controller) schedulePressed() {
 	c.mu.Lock()
 	p := c.session.sched.preset()
-	start := c.session.sched.start
+	start := c.session.sched.start()
 	ok := c.session.sched.canSchedule(c.now())
 	c.mu.Unlock()
 	if !ok || p == nil {

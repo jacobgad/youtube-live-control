@@ -13,13 +13,15 @@ import (
 
 const noPresetLabel = "No presets — create one in the web UI"
 
-// scheduling is the state behind the YouTube Live Scheduling device. The start is
-// recomputed from the preset (never persisted) so a stale date cannot linger.
+// scheduling is the state behind the YouTube Live Scheduling device. Date and time
+// are recomputed from the preset (never persisted) so a stale date cannot linger.
 type scheduling struct {
-	presets  []preset.Preset
-	labels   []string
-	presetID string
-	start    time.Time
+	presets   []preset.Preset
+	labels    []string
+	presetID  string
+	date      time.Time
+	timeOfDay time.Duration
+	timeSet   bool
 }
 
 func (sc *scheduling) setPresets(list []preset.Preset) {
@@ -77,10 +79,26 @@ func (sc *scheduling) presetIDForLabel(label string) (string, bool) {
 func (sc *scheduling) applyDefaults(now time.Time, taken []time.Time) {
 	p := sc.preset()
 	if p == nil {
-		sc.start = time.Time{}
+		sc.date, sc.timeOfDay, sc.timeSet = time.Time{}, 0, false
 		return
 	}
-	sc.start = nextFreeSlot(*p, now, taken)
+	start := nextFreeSlot(*p, now, taken).Local()
+	sc.date = dayOf(start)
+	sc.timeOfDay = time.Duration(start.Hour())*time.Hour + time.Duration(start.Minute())*time.Minute
+	sc.timeSet = true
+}
+
+func dayOf(t time.Time) time.Time {
+	t = t.Local()
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+}
+
+// start combines the chosen day and time-of-day in local time; zero while either is unset.
+func (sc *scheduling) start() time.Time {
+	if sc.date.IsZero() || !sc.timeSet {
+		return time.Time{}
+	}
+	return sc.date.Add(sc.timeOfDay)
 }
 
 func nextFreeSlot(p preset.Preset, now time.Time, taken []time.Time) time.Time {
@@ -103,24 +121,38 @@ func slotTaken(start time.Time, taken []time.Time) bool {
 	return false
 }
 
-// startPayload is what the datetime entity expects: ISO 8601 with an offset, or
-// Home Assistant's null payload while unset.
-func (sc *scheduling) startPayload() string {
-	if sc.start.IsZero() {
+// The date and time entities exchange plain ISO values (2006-01-02, 15:04:05) or
+// Home Assistant's null payload.
+func (sc *scheduling) datePayload() string {
+	if sc.date.IsZero() {
 		return mqttNone
 	}
-	return sc.start.Format(time.RFC3339)
+	return sc.date.Format(time.DateOnly)
 }
 
-// parseStart accepts the datetime entity's command payload (isoformat of an aware
-// datetime, with or without fractional seconds).
-func parseStart(raw string) (time.Time, error) {
-	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05.999999-07:00", "2006-01-02T15:04-07:00"} {
-		if t, err := time.Parse(layout, raw); err == nil {
-			return t.Truncate(time.Minute), nil
+func (sc *scheduling) timePayload() string {
+	if !sc.timeSet {
+		return mqttNone
+	}
+	return time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC).Add(sc.timeOfDay).Format(time.TimeOnly)
+}
+
+func parseDate(raw string) (time.Time, error) {
+	for _, layout := range []string{time.DateOnly, time.RFC3339} {
+		if t, err := time.ParseInLocation(layout, raw, time.Local); err == nil {
+			return dayOf(t), nil
 		}
 	}
-	return time.Time{}, fmt.Errorf("%q is not an ISO 8601 date-time with a timezone", raw)
+	return time.Time{}, fmt.Errorf("%q is not an ISO date", raw)
+}
+
+func parseTimeOfDay(raw string) (time.Duration, error) {
+	for _, layout := range []string{time.TimeOnly, "15:04:05.999999", "15:04"} {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return time.Duration(t.Hour())*time.Hour + time.Duration(t.Minute())*time.Minute, nil
+		}
+	}
+	return 0, fmt.Errorf("%q is not an ISO time", raw)
 }
 
 func (sc *scheduling) canSchedule(now time.Time) bool {
@@ -128,7 +160,8 @@ func (sc *scheduling) canSchedule(now time.Time) bool {
 	if p == nil || p.StreamID == "" {
 		return false
 	}
-	return !sc.start.IsZero() && sc.start.After(now)
+	start := sc.start()
+	return !start.IsZero() && start.After(now)
 }
 
 type persistedState struct {
