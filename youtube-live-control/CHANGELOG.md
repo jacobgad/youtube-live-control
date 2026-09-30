@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.6.3
+
+- Scheduling device clears Preset, Date and Time after a successful Schedule, as the visible confirmation; it starts empty (the last-used preset is no longer remembered).
+
 ## 1.6.2
 
 - Category select shows exactly the 15 categories YouTube Studio offers, sorted by name. Regional API lists are unreliable (Australia's omits *Nonprofits & Activism* entirely), so the global assignable set is used.

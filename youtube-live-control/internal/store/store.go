@@ -19,11 +19,8 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// Settings keys.
-const (
-	KeyRefreshToken = "refresh_token"
-	KeyLastPreset   = "last_preset_id"
-)
+// KeyRefreshToken is the settings key holding the Google refresh token.
+const KeyRefreshToken = "refresh_token"
 
 // ErrImageInUse is returned when deleting an image a preset still references.
 var ErrImageInUse = errors.New("image is used by a preset")

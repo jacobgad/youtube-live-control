@@ -122,19 +122,14 @@ func (c *Controller) Start(ctx context.Context) error {
 	if !c.started.CompareAndSwap(false, true) {
 		return nil
 	}
-	lastPreset, _, err := c.store.Setting(ctx, store.KeyLastPreset)
-	if err != nil {
-		c.log.Warn("state_read_failed", "error", err.Error())
-	}
 	c.mu.Lock()
 	c.session.authorized = c.auth.Authorized()
-	c.session.sched.presetID = lastPreset
 	c.mu.Unlock()
 	c.loadPresets(ctx)
 	c.log.Info("controller_started", "authorized", c.auth.Authorized(), "options", c.opts)
 
 	waitCtx, cancel := context.WithTimeout(ctx, mqttStartupWait)
-	err = c.mqtt.AwaitConnection(waitCtx)
+	err := c.mqtt.AwaitConnection(waitCtx)
 	cancel()
 	if err != nil {
 		c.log.Warn("mqtt_not_ready", "detail", "continuing; state will be republished on connect")
@@ -455,11 +450,6 @@ func (c *Controller) selectPreset(label string) {
 	c.session.sched.applyDefaults(c.now(), c.session.allStarts())
 	c.mu.Unlock()
 	c.log.Info("preset_selected", "id", id, "name", label)
-	c.background(func(ctx context.Context) {
-		if err := c.store.SetSetting(ctx, store.KeyLastPreset, id); err != nil {
-			c.log.Warn("state_persist_failed", "error", err.Error())
-		}
-	})
 	c.publishUpdate()
 }
 
@@ -514,7 +504,10 @@ func (c *Controller) schedulePressed() {
 		if _, err := c.createBroadcast(ctx, req); err != nil {
 			return err
 		}
-		c.resetScheduleDefaults()
+		// Cleared entities are the visible confirmation that the press worked.
+		c.mu.Lock()
+		c.session.sched.clear()
+		c.mu.Unlock()
 		c.pub.update(ctx, c.snapshot)
 		return nil
 	})

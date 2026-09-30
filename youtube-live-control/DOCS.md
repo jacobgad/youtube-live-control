@@ -52,7 +52,7 @@ Web UI → **Presets → Create**. A preset is everything a regular service need
 
 ### Schedule (dashboard, *YouTube Live Scheduling* device)
 
-Pick a **Preset** — **Date** and **Time** jump to its next free usual slot — adjust if this week differs, press **Schedule**. The broadcast is created with the preset's title, description, privacy, stream key and thumbnail, and appears in the **Broadcast** select. Schedule is greyed while no preset is chosen, the preset has no stream key, or the slot is in the past. It never changes which broadcast Home Assistant is on.
+Pick a **Preset** — **Date** and **Time** jump to its next free usual slot — adjust if this week differs, press **Schedule**. The broadcast is created with the preset's title, description, privacy, category, stream key and thumbnail and appears in the **Broadcast** select; Preset, Date and Time clear to confirm. Schedule is greyed while no preset is chosen, the preset has no stream key, or the slot is in the past. It never changes which broadcast Home Assistant is on.
 
 ### Operate (dashboard, *YouTube Live* device)
 
@@ -106,7 +106,7 @@ The web UI is for Home Assistant admins only.
 
 | Entity | Type |
 | --- | --- |
-| Preset | select |
+| Preset | select (empty until chosen) |
 | Date | date |
 | Time | time |
 | Schedule | button |

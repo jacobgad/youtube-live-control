@@ -72,6 +72,11 @@ func (sc *scheduling) presetIDForLabel(label string) (string, bool) {
 	return "", false
 }
 
+func (sc *scheduling) clear() {
+	sc.presetID = ""
+	sc.date, sc.timeOfDay, sc.timeSet = time.Time{}, 0, false
+}
+
 func (sc *scheduling) applyDefaults(now time.Time, taken []time.Time) {
 	p := sc.preset()
 	if p == nil {

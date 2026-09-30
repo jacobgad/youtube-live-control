@@ -117,22 +117,22 @@ func TestSavePresetRejectsUnknownImage(t *testing.T) {
 func TestSettings(t *testing.T) {
 	ctx := context.Background()
 	s := open(t)
-	if _, ok, err := s.Setting(ctx, KeyLastPreset); ok || err != nil {
+	if _, ok, err := s.Setting(ctx, "last_preset_id"); ok || err != nil {
 		t.Fatalf("unset setting: %v %v", ok, err)
 	}
-	if err := s.SetSetting(ctx, KeyLastPreset, "abc"); err != nil {
+	if err := s.SetSetting(ctx, "last_preset_id", "abc"); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.SetSetting(ctx, KeyLastPreset, "def"); err != nil {
+	if err := s.SetSetting(ctx, "last_preset_id", "def"); err != nil {
 		t.Fatal(err)
 	}
-	if v, ok, _ := s.Setting(ctx, KeyLastPreset); !ok || v != "def" {
+	if v, ok, _ := s.Setting(ctx, "last_preset_id"); !ok || v != "def" {
 		t.Fatalf("setting = %q %v", v, ok)
 	}
-	if err := s.DeleteSetting(ctx, KeyLastPreset); err != nil {
+	if err := s.DeleteSetting(ctx, "last_preset_id"); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok, _ := s.Setting(ctx, KeyLastPreset); ok {
+	if _, ok, _ := s.Setting(ctx, "last_preset_id"); ok {
 		t.Fatal("setting not deleted")
 	}
 }

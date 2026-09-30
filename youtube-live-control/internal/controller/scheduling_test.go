@@ -81,6 +81,18 @@ func TestParseDateAndTime(t *testing.T) {
 	}
 }
 
+func TestClearAfterSchedule(t *testing.T) {
+	now := time.Date(2025, 1, 1, 12, 0, 0, 0, time.Local)
+	sc := scheduling{}
+	sc.setPresets([]preset.Preset{sundayPreset()})
+	sc.presetID = "abc"
+	sc.applyDefaults(now, nil)
+	sc.clear()
+	if sc.presetID != "" || !sc.start().IsZero() || sc.canSchedule(now) || sc.presetLabel() != noPresetLabel {
+		t.Fatalf("not cleared: %+v", sc)
+	}
+}
+
 func TestPresetListChangesKeepOrDropSelection(t *testing.T) {
 	sc := scheduling{}
 	sc.setPresets([]preset.Preset{sundayPreset(), {ID: "def", Name: "Sunday"}})
