@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.1
+
+- Web UI: **Duplicate** a preset (copies the thumbnail too) and land on the copy's edit page.
+
 ## 1.3.0
 
 - **Native date-time picker for scheduling.** Home Assistant 2026.5 added an MQTT `datetime` platform, so the Date and Time selects are replaced by one **Start** entity — the platform's own picker — and the half-hour rule is gone everywhere (dashboard, presets, web UI). Requires Home Assistant 2026.5 or newer (declared in the add-on manifest). The retired Date/Time select configs are cleared on start.

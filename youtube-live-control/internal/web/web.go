@@ -122,6 +122,7 @@ func (s *Server) Run(ctx context.Context) error {
 	ingressMux.HandleFunc("GET /presets/{id}", s.requireAuth(s.handlePresetForm))
 	ingressMux.HandleFunc("POST /presets/{id}", s.requireAuth(s.handleSavePreset))
 	ingressMux.HandleFunc("POST /presets/{id}/delete", s.requireAuth(s.handleDeletePreset))
+	ingressMux.HandleFunc("POST /presets/{id}/duplicate", s.requireAuth(s.handleDuplicatePreset))
 	ingressMux.HandleFunc("GET /presets/{id}/thumbnail", s.handlePresetThumbnail)
 
 	callbackMux := http.NewServeMux()

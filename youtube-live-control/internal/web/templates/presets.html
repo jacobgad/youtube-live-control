@@ -12,6 +12,9 @@
 {{with index $.Data.Streams .StreamID}} · {{.Title}}{{else}} · <span class="badge warn">stream key missing</span>{{end}}</div>
 </div>
 <div class="side">
+<form class="inline" method="post" action="{{$.Base}}/presets/{{.ID}}/duplicate">
+<button type="submit" class="quiet">Duplicate</button>
+</form>
 <form class="inline" method="post" action="{{$.Base}}/presets/{{.ID}}/delete" onsubmit="return confirm('Delete preset “{{.Name}}”?');">
 <button type="submit" class="danger">Delete</button>
 </form>

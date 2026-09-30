@@ -74,7 +74,7 @@ Open it from the add-on's Info tab or the sidebar. It is restricted to Home Assi
 | Stream key | Which of the channel's stream keys (YouTube Studio → *Stream settings*) the broadcast is bound to — the one OBS is configured with. A broadcast without a stream key can never go live. |
 | Thumbnail | JPEG/PNG up to 2 MB, uploaded to every broadcast scheduled from the preset. |
 
-Presets are stored in `/data/presets/`.
+**Duplicate** copies a preset (with its thumbnail) as *<name> (copy)* and opens it for editing — the quick way to make a variant such as an evening service. Presets are stored in `/data/presets/`.
 
 **Broadcasts** — lists upcoming and live broadcasts (with the one currently on the Home Assistant panel marked), and *Never started* ones — scheduled more than a day ago and still `ready`, hidden from the panel, with a **Delete** button to clean them up.
 
@@ -205,6 +205,8 @@ The YouTube Data API allows 10,000 units/day by default. Reads cost 1; insert/up
 The fast window is armed automatically by **any** interaction with the panel — changing the selection, typing a title, pressing a button (even a refused press: tapping End Stream while YouTube still reports the stream active is exactly the moment you want a fast poll). Each interaction restarts the timer, and the add-on switches it off itself when the window expires — so a dashboard left on Sunday's selection cannot drain Monday's quota. It also self-arms when a Go Live / End Stream transition finishes and when authorization is granted.
 
 Budgeting: the separate list poll costs 2 units per cycle (~576/day at 5 minutes); a full service — schedule, a couple of edits, go live, end, with generous fast-mode use — stays around 500–800 units.
+
+YouTube does not expose remaining quota through its API; actual usage is visible in Google Cloud Console under **APIs & Services → YouTube Data API v3 → Quotas**.
 
 ## Troubleshooting
 

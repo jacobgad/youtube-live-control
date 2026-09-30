@@ -113,6 +113,17 @@ func (s *Server) handleDeletePreset(w http.ResponseWriter, r *http.Request) {
 	s.redirect(w, r, "/presets", "notice", "Preset deleted.")
 }
 
+func (s *Server) handleDuplicatePreset(w http.ResponseWriter, r *http.Request) {
+	copied, err := s.presets.Duplicate(r.PathValue("id"))
+	if err != nil {
+		s.redirect(w, r, "/presets", "error", "Could not duplicate the preset: "+err.Error())
+		return
+	}
+	s.log.Info("preset_duplicated", "from", r.PathValue("id"), "id", copied.ID)
+	s.ctrl.PresetsChanged()
+	s.redirect(w, r, "/presets/"+copied.ID, "notice", "Duplicated as “"+copied.Name+"” — rename it and adjust what differs.")
+}
+
 func (s *Server) handlePresetThumbnail(w http.ResponseWriter, r *http.Request) {
 	image, contentType, ok, err := s.presets.Thumbnail(r.PathValue("id"))
 	if err != nil || !ok {

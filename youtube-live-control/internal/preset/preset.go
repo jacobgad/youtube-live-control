@@ -186,6 +186,29 @@ func (s *Store) Thumbnail(id string) (image []byte, contentType string, ok bool,
 	return image, ContentType(p.ThumbnailFile), true, nil
 }
 
+// Duplicate copies a preset (and its image) under a new id, named "<name> (copy)".
+func (s *Store) Duplicate(id string) (Preset, error) {
+	p, err := s.Get(id)
+	if err != nil {
+		return Preset{}, err
+	}
+	image, _, hasImage, err := s.Thumbnail(id)
+	if err != nil {
+		return Preset{}, err
+	}
+	ext := filepath.Ext(p.ThumbnailFile)
+	p.ID, p.ThumbnailFile = "", ""
+	p.Name += " (copy)"
+	copied, err := s.Save(p)
+	if err != nil {
+		return Preset{}, err
+	}
+	if hasImage {
+		return s.SetThumbnail(copied.ID, ext, image)
+	}
+	return copied, nil
+}
+
 // Delete removes a preset and its image.
 func (s *Store) Delete(id string) error {
 	p, err := s.Get(id)

@@ -42,6 +42,31 @@ func TestStoreRoundTrip(t *testing.T) {
 	}
 }
 
+func TestDuplicateCopiesRecordAndImage(t *testing.T) {
+	store, _ := Open(t.TempDir())
+	original, _ := store.Save(sample())
+	if _, err := store.SetThumbnail(original.ID, ".png", []byte("png")); err != nil {
+		t.Fatal(err)
+	}
+	copied, err := store.Duplicate(original.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if copied.ID == original.ID || copied.Name != "Sunday (copy)" || copied.StreamID != original.StreamID {
+		t.Fatalf("copy = %+v", copied)
+	}
+	image, _, ok, err := store.Thumbnail(copied.ID)
+	if err != nil || !ok || string(image) != "png" || copied.ThumbnailFile == original.ThumbnailFile {
+		t.Fatalf("copied image = %q %v %v (file %s)", image, ok, err, copied.ThumbnailFile)
+	}
+	if err := store.Delete(original.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, ok, _ := store.Thumbnail(copied.ID); !ok {
+		t.Fatal("deleting the original must not remove the copy's image")
+	}
+}
+
 func TestValidate(t *testing.T) {
 	bad := []Preset{
 		{},
