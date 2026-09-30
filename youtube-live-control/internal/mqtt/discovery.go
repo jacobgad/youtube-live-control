@@ -40,15 +40,13 @@ const (
 	iconFastMode  = "mdi:speedometer"
 	iconFastLeft  = "mdi:timer-outline"
 	iconStage     = "mdi:progress-check"
-	iconStart     = "mdi:calendar-clock"
 	iconHealth    = "mdi:pulse"
 	iconStatus    = "mdi:broadcast"
 	iconGoLive    = "mdi:play-circle"
 	iconEnd       = "mdi:stop-circle"
 	iconAuth      = "mdi:shield-account"
 	iconPreset    = "mdi:playlist-star"
-	iconDate      = "mdi:calendar"
-	iconTime      = "mdi:clock-outline"
+	iconStart     = "mdi:calendar-clock"
 	iconSchedule  = "mdi:calendar-plus"
 
 	// MaxTitleLength is YouTube's limit.
@@ -100,13 +98,9 @@ func Messages(o Origin, opts Options) []Message {
 			"command_topic": PresetSet,
 			"options":       orEmpty(opts.Presets),
 		}, o),
-		commandEntity(SchedulingNodeID, "date", "date", "Date", iconDate, map[string]any{
-			"state_topic":   DateState,
-			"command_topic": DateSet,
-		}, o),
-		commandEntity(SchedulingNodeID, "time", "time", "Time", iconTime, map[string]any{
-			"state_topic":   TimeState,
-			"command_topic": TimeSet,
+		commandEntity(SchedulingNodeID, "datetime", "start", "Start", iconStart, map[string]any{
+			"state_topic":   StartState,
+			"command_topic": StartSet,
 		}, o),
 		button(SchedulingNodeID, "schedule", "Schedule", iconSchedule, SchedulePress, ScheduleAvailability, o),
 	}

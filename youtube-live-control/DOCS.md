@@ -7,7 +7,7 @@ Runs a channel's scheduled YouTube live streams from Home Assistant.
 
 ## Requirements
 
-- Home Assistant 2026.5 or newer
+- Home Assistant 2026.5 or newer (MQTT date-time entity)
 - The **Mosquitto broker** add-on and the **MQTT integration** (credentials are read from the Supervisor)
 - A Google Cloud project with the **YouTube Data API v3** enabled and an OAuth client (below)
 
@@ -40,7 +40,7 @@ Web UI → **Presets → Create**. A preset is everything a regular service need
 | Name | e.g. *Sunday morning* |
 | Title | `{date}` becomes the scheduled date: `Sunday Service – {date}` → *Sunday Service – 5 Jan 2025* |
 | Description | copied to each broadcast |
-| Usual day and time | pre-fills Date and Time with the next occurrence that isn't already scheduled |
+| Usual day and time | pre-fills Start with the next occurrence that isn't already scheduled |
 | Privacy | public / unlisted / private |
 | Category | one of the 15 categories YouTube Studio offers; *YouTube default* leaves it to YouTube |
 | Stream key | the channel's stream key OBS is configured with; a broadcast without one can never go live |
@@ -52,7 +52,7 @@ Web UI → **Presets → Create**. A preset is everything a regular service need
 
 ### Schedule (dashboard, *YouTube Live Scheduling* device)
 
-Pick a **Preset** — **Date** and **Time** jump to its next free usual slot — adjust if this week differs, press **Schedule**. The broadcast is created with the preset's title, description, privacy, category, stream key and thumbnail and appears in the **Broadcast** select; Preset, Date and Time clear to confirm. Schedule is greyed while no preset is chosen, the preset has no stream key, or the slot is in the past. It never changes which broadcast Home Assistant is on.
+Pick a **Preset** — **Start** jumps to its next free usual slot — adjust if this week differs, press **Schedule**. The broadcast is created with the preset's title, description, privacy, category, stream key and thumbnail and appears in the **Broadcast** select; Preset and Start clear to confirm. Schedule is greyed while no preset is chosen, the preset has no stream key, or the slot is in the past. It never changes which broadcast Home Assistant is on.
 
 ### Operate (dashboard, *YouTube Live* device)
 
@@ -107,8 +107,7 @@ The web UI is for Home Assistant admins only.
 | Entity | Type |
 | --- | --- |
 | Preset | select (empty until chosen) |
-| Date | date |
-| Time | time |
+| Start | datetime |
 | Schedule | button |
 
 Both devices appear under **Settings → Devices & services → MQTT**; Home Assistant's auto-generated dashboard gives each its own card. Invalid input (empty title, over 100 characters, unknown option) is rejected and the field snaps back.
@@ -168,7 +167,7 @@ Each option is described on the add-on's Configuration tab.
 | Broadcast select is empty although a stream is scheduled | wrong channel (check **Channel**), or the broadcast is under *Never started* in the web UI |
 | Go Live unavailable | read **Stage**: `waiting_for_encoder` — OBS not sending; `no_stream_key` — fix in the web UI |
 | End Stream unavailable after stopping OBS | `stream_stopping` for up to a minute; a tap on End Stream arms fast polling |
-| Schedule greyed | no preset, preset without stream key, or past date/time |
-| Date / Time entities missing | Home Assistant older than 2026.5 |
+| Schedule greyed | no preset, preset without stream key, or a start in the past |
+| Start entity missing | Home Assistant older than 2026.5 |
 | `quotaExceeded` in the log | daily quota spent; resets midnight Pacific; raise the poll intervals |
 | `supervisor did not return a usable MQTT service` | start the Mosquitto broker add-on |

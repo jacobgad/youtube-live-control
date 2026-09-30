@@ -15,7 +15,7 @@ Home Assistant ──MQTT──▶ Mosquitto ◀──MQTT── youtube-live-co
                                                └─ commands: verify → write → read back
 ```
 
-- **Two MQTT devices.** *YouTube Live Scheduling* creates broadcasts from presets (Preset, Date, Time, Schedule). *YouTube Live* is the selected broadcast: Broadcast select, Title and Privacy applied immediately, a Stage enum sensor, timestamp, image and binary sensors, Go Live and End Stream. Every entity is a core Home Assistant platform.
+- **Two MQTT devices.** *YouTube Live Scheduling* creates broadcasts from presets (Preset, Start, Schedule). *YouTube Live* is the selected broadcast: Broadcast select, Title and Privacy applied immediately, a Stage enum sensor, timestamp, image and binary sensors, Go Live and End Stream. Every entity is a core Home Assistant platform.
 - **Nothing is optimistic.** Commands re-read the broadcast and stream, write, then read back before publishing. State topics are retained, command topics are not, replays are dropped. `enableAutoStart`/`enableAutoStop` are always false; Go Live needs the stream `active`, End Stream needs it stopped.
 - **Nothing selects itself.** The Broadcast select is sorted live-first then soonest; only a person changes it.
 - **Polling follows people.** Idle, live and fast tiers; any interaction with the entities arms the fast window, which expires on its own.

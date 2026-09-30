@@ -1,9 +1,12 @@
 package controller
 
 import (
+	"context"
+	"log/slog"
 	"testing"
 	"time"
 
+	"github.com/jacobgad/youtube-live-control/internal/mqtt"
 	"github.com/jacobgad/youtube-live-control/internal/preset"
 )
 
@@ -18,26 +21,26 @@ func TestPresetDefaultsSkipTakenSlots(t *testing.T) {
 	sc.presetID = "abc"
 
 	sc.applyDefaults(now, nil)
-	if start := sc.start(); start.Day() != 5 || start.Hour() != 9 || start.Minute() != 30 {
-		t.Fatalf("default start = %v", start)
+	if sc.start.Day() != 5 || sc.start.Hour() != 9 || sc.start.Minute() != 30 {
+		t.Fatalf("default start = %v", sc.start)
 	}
-	firstSunday := sc.start()
+	firstSunday := sc.start
 	sc.applyDefaults(now, []time.Time{firstSunday})
-	if sc.start().Day() != 12 {
-		t.Fatalf("taken slot not skipped: %v", sc.start())
+	if sc.start.Day() != 12 {
+		t.Fatalf("taken slot not skipped: %v", sc.start)
 	}
 	if !sc.canSchedule(now) {
 		t.Fatal("a preset with a stream key and a future slot should be schedulable")
 	}
-	if sc.datePayload() != "2025-01-12" || sc.timePayload() != "09:30:00" {
-		t.Fatalf("payloads = %q %q", sc.datePayload(), sc.timePayload())
+	if sc.startPayload() != sc.start.Format(time.RFC3339) {
+		t.Fatalf("payload = %q", sc.startPayload())
 	}
 }
 
 func TestScheduleGate(t *testing.T) {
 	now := time.Date(2025, 1, 1, 12, 0, 0, 0, time.Local)
 	sc := scheduling{}
-	if sc.canSchedule(now) || sc.datePayload() != mqttNone || sc.timePayload() != mqttNone {
+	if sc.canSchedule(now) || sc.startPayload() != mqttNone {
 		t.Fatal("no preset must gate off and publish None")
 	}
 	noKey := sundayPreset()
@@ -49,36 +52,52 @@ func TestScheduleGate(t *testing.T) {
 		t.Fatal("a preset without a stream key must gate off")
 	}
 	sc.setPresets([]preset.Preset{sundayPreset()})
-	sc.date = dayOf(now)
-	sc.timeOfDay, sc.timeSet = 8*time.Hour, true
+	sc.start = now.Add(-time.Hour)
 	if sc.canSchedule(now) {
 		t.Fatal("a past slot must gate off")
 	}
-	sc.timeSet = false
-	if sc.canSchedule(now) || !sc.start().IsZero() {
-		t.Fatal("an unset time must gate off")
+}
+
+func TestParseStart(t *testing.T) {
+	for _, raw := range []string{"2025-01-05T09:30:00+10:00", "2025-01-05T09:30:00.123456+10:00", "2025-01-04T23:30:00Z"} {
+		if _, err := parseStart(raw); err != nil {
+			t.Fatalf("parseStart(%q): %v", raw, err)
+		}
+	}
+	got, _ := parseStart("2025-01-05T09:47:12+10:00")
+	if got.Second() != 0 || got.Minute() != 47 {
+		t.Fatalf("seconds truncated, minutes kept: %v", got)
+	}
+	for _, raw := range []string{"", "2025-01-05T09:30:00", "Sun 5 Jan", "09:30"} {
+		if _, err := parseStart(raw); err == nil {
+			t.Fatalf("parseStart(%q) accepted", raw)
+		}
 	}
 }
 
-func TestParseDateAndTime(t *testing.T) {
-	day, err := parseDate("2025-01-05")
-	if err != nil || day.Day() != 5 || day.Hour() != 0 {
-		t.Fatalf("parseDate = %v %v", day, err)
+type nullConn struct{}
+
+func (nullConn) Publish(context.Context, string, string, bool) error { return nil }
+func (nullConn) Subscribe(context.Context, []string) error           { return nil }
+func (nullConn) OnMessage(mqtt.MessageHandler)                       {}
+func (nullConn) OnConnect(func())                                    {}
+func (nullConn) Connected() bool                                     { return true }
+func (nullConn) AwaitConnection(context.Context) error               { return nil }
+func (nullConn) Close(context.Context) error                         { return nil }
+
+func TestEnterStartRejectsInvalidPayload(t *testing.T) {
+	c := &Controller{now: time.Now, opts: testOptions, log: slog.Default(), pub: newPublisher(nullConn{}, mqtt.Origin{}, slog.Default())}
+	c.lifetime, c.endLife = context.WithCancel(context.Background())
+	defer c.endLife()
+	c.enterStart("Sun 5 Jan")
+	if !c.session.sched.start.IsZero() {
+		t.Fatal("invalid payload must not set start")
 	}
-	for _, raw := range []string{"09:30:00", "09:30:00.123456", "09:30"} {
-		tod, err := parseTimeOfDay(raw)
-		if err != nil || tod != 9*time.Hour+30*time.Minute {
-			t.Fatalf("parseTimeOfDay(%q) = %v %v", raw, tod, err)
-		}
+	c.enterStart("2025-01-05T09:30:00+10:00")
+	if c.session.sched.start.IsZero() {
+		t.Fatal("valid payload must set start")
 	}
-	for _, raw := range []string{"", "Sun 5 Jan", "5/1/2025"} {
-		if _, err := parseDate(raw); err == nil {
-			t.Fatalf("parseDate(%q) accepted", raw)
-		}
-	}
-	if _, err := parseTimeOfDay("25:00"); err == nil {
-		t.Fatal("parseTimeOfDay accepted 25:00")
-	}
+	c.inflight.Wait()
 }
 
 func TestClearAfterSchedule(t *testing.T) {
@@ -88,7 +107,7 @@ func TestClearAfterSchedule(t *testing.T) {
 	sc.presetID = "abc"
 	sc.applyDefaults(now, nil)
 	sc.clear()
-	if sc.presetID != "" || !sc.start().IsZero() || sc.canSchedule(now) || sc.presetLabel() != noPresetLabel {
+	if sc.presetID != "" || !sc.start.IsZero() || sc.canSchedule(now) || sc.presetLabel() != noPresetLabel {
 		t.Fatalf("not cleared: %+v", sc)
 	}
 }

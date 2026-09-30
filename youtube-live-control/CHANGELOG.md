@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.0
+
+- Scheduling device: **Start** is one date-time entity again (Home Assistant's native picker), reversing 1.3.2's Date/Time split; the retired configs are cleared on start.
+
 ## 1.6.3
 
 - Scheduling device clears Preset, Date and Time after a successful Schedule, as the visible confirmation; it starts empty (the last-used preset is no longer remembered).
