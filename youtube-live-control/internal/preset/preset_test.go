@@ -48,8 +48,11 @@ func TestValidate(t *testing.T) {
 		{Name: "x", TitleTemplate: "t", Privacy: "secret", StreamID: "s", TimeOfDay: "09:30"},
 		{Name: "x", TitleTemplate: "t", Privacy: "public", StreamID: "", TimeOfDay: "09:30"},
 		{Name: "x", TitleTemplate: "t", Privacy: "public", StreamID: "s", TimeOfDay: "9.30"},
-		{Name: "x", TitleTemplate: "t", Privacy: "public", StreamID: "s", TimeOfDay: "09:15"},
-		{Name: "x", TitleTemplate: "t", Privacy: "public", StreamID: "s", TimeOfDay: "02:00"},
+	}
+	quarter := sample()
+	quarter.TimeOfDay = "09:15"
+	if err := quarter.Validate(); err != nil {
+		t.Fatalf("any minute is a valid usual time now: %v", err)
 	}
 	for i, p := range bad {
 		if p.Validate() == nil {

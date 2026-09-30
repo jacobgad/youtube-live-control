@@ -29,8 +29,6 @@ func (m Message) JSON() string {
 type Options struct {
 	Broadcasts []string
 	Presets    []string
-	Dates      []string
-	Times      []string
 }
 
 const (
@@ -50,8 +48,7 @@ const (
 	iconEnd       = "mdi:stop-circle"
 	iconAuth      = "mdi:shield-account"
 	iconPreset    = "mdi:playlist-star"
-	iconDate      = "mdi:calendar"
-	iconTime      = "mdi:clock-outline"
+	iconStartAt   = "mdi:calendar-clock"
 	iconSchedule  = "mdi:calendar-plus"
 
 	// MaxTitleLength is YouTube's limit for a broadcast title.
@@ -103,15 +100,9 @@ func Messages(o Origin, opts Options) []Message {
 			"command_topic": PresetSet,
 			"options":       orEmpty(opts.Presets),
 		}, o),
-		commandEntity(SchedulingNodeID, "select", "date", "Date", iconDate, map[string]any{
-			"state_topic":   DateState,
-			"command_topic": DateSet,
-			"options":       orEmpty(opts.Dates),
-		}, o),
-		commandEntity(SchedulingNodeID, "select", "time", "Time", iconTime, map[string]any{
-			"state_topic":   TimeState,
-			"command_topic": TimeSet,
-			"options":       orEmpty(opts.Times),
+		commandEntity(SchedulingNodeID, "datetime", "start", "Start", iconStartAt, map[string]any{
+			"state_topic":   StartState,
+			"command_topic": StartSet,
 		}, o),
 		button(SchedulingNodeID, "schedule", "Schedule", iconSchedule, SchedulePress, ScheduleAvailability, o),
 	}

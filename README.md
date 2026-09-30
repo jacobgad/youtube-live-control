@@ -1,6 +1,6 @@
 # YouTube Live Control
 
-Home Assistant add-on for running a channel's scheduled YouTube live streams. Producers **schedule from presets** on the dashboard (preset · date · time · Schedule); volunteers **operate** from the dashboard (Broadcast · Title · Privacy · **Stage** · Go Live / End Stream). Presets, descriptions, thumbnails and off-pattern dates are set up in the add-on's web UI. Dashboards, automations and access control are Home Assistant's job; the add-on is only the YouTube driver.
+Home Assistant add-on for running a channel's scheduled YouTube live streams. Producers **schedule from presets** on the dashboard (preset · start · Schedule); volunteers **operate** from the dashboard (Broadcast · Title · Privacy · **Stage** · Go Live / End Stream). Presets, descriptions, thumbnails and off-pattern dates are set up in the add-on's web UI. Dashboards, automations and access control are Home Assistant's job; the add-on is only the YouTube driver.
 
 User documentation: [`youtube-live-control/DOCS.md`](youtube-live-control/DOCS.md).
 
@@ -15,7 +15,7 @@ Home Assistant ──MQTT──▶ Mosquitto ◀──MQTT── YouTube Live Co
                                                └─ commands: verify → write → read back
 ```
 
-- **Two devices, platform-native entities.** *YouTube Live Scheduling* (Preset / Date / Time / Schedule) creates from presets; *YouTube Live* is the selected broadcast: Broadcast select (sorted live-first, soonest-first; nothing selects automatically), Title and Privacy applied immediately, a **Stage** enum sensor, a timestamp **Scheduled start**, **Live** / **Encoder connected** binary sensors, Go Live / End Stream. A core image entity carries the thumbnail; the watch URL rides along as an attribute. Everything renders with core Lovelace cards; there is never one entity per broadcast.
+- **Two devices, platform-native entities.** *YouTube Live Scheduling* (Preset / Start / Schedule) creates from presets; *YouTube Live* is the selected broadcast: Broadcast select (sorted live-first, soonest-first; nothing selects automatically), Title and Privacy applied immediately, a **Stage** enum sensor, a timestamp **Scheduled start**, **Live** / **Encoder connected** binary sensors, Go Live / End Stream. A core image entity carries the thumbnail; the watch URL rides along as an attribute. Everything renders with core Lovelace cards; there is never one entity per broadcast.
 - **Writes are verified.** Before any command the broadcast and its bound stream are re-read from the API; after the write, the result is read back before Home Assistant is updated. Nothing is published optimistically.
 - **Transitions are gated on reality.** Go Live requires the encoder's `streamStatus` to be `active`; End Stream requires being live with the stream no longer active. `enableAutoStart`/`enableAutoStop` are always written as `false`, so only the buttons ever transition a broadcast. While `streamStatus` lags a stopped encoder, Stage shows `stream_stopping`.
 - **Nothing transitions on its own.** State is retained, commands are not, retained replays are dropped: restarts of the add-on, the broker or Home Assistant republish state but never start or stop a broadcast.
@@ -45,7 +45,8 @@ Prefix `ylc/`. State is retained; commands (`…/set`, `…/press`) are not, and
 | `ylc/{stream_health,broadcast_status}/state` | diagnostic sensors |
 | `ylc/{go_live,end_stream}/press` | buttons |
 | `ylc/{go_live,end_stream}/availability` | per-button gates |
-| `ylc/{preset,date,time}/{state,set}` | scheduling selects |
+| `ylc/preset/{state,set}` | Preset select |
+| `ylc/start/{state,set}` | Start `datetime` entity, ISO 8601 with offset (`None` while unset) |
 | `ylc/schedule/press`, `ylc/schedule/availability` | Schedule button and gate |
 
 Device identifiers `ylc:controller` (entities `youtube_live_control_<object>`) and `ylc:scheduling` (entities `youtube_live_scheduling_<object>`, `via_device` the former); discovery configs under `homeassistant/<component>/<node>/<object>/config`, republished when select options change.

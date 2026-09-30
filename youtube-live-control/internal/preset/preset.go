@@ -19,24 +19,6 @@ import (
 	"github.com/jacobgad/youtube-live-control/internal/youtube"
 )
 
-// The dashboard's Time select spans these half-hour slots; a preset outside them
-// would default to a time the panel cannot show.
-const (
-	FirstSlot = 6 * time.Hour
-	LastSlot  = 23*time.Hour + 30*time.Minute
-	SlotStep  = 30 * time.Minute
-)
-
-// ValidSlot reports whether a "15:04" time is a half-hour within the dashboard window.
-func ValidSlot(hhmm string) bool {
-	t, err := time.Parse("15:04", hhmm)
-	if err != nil {
-		return false
-	}
-	d := time.Duration(t.Hour())*time.Hour + time.Duration(t.Minute())*time.Minute
-	return d >= FirstSlot && d <= LastSlot && d%SlotStep == 0
-}
-
 // DatePlaceholder in a title template is replaced by the scheduled date.
 const DatePlaceholder = "{date}"
 
@@ -70,8 +52,8 @@ func (p Preset) Validate() error {
 	case p.Weekday < time.Sunday || p.Weekday > time.Saturday:
 		return errors.New("weekday is out of range")
 	}
-	if !ValidSlot(p.TimeOfDay) {
-		return errors.New("time must be on the hour or half hour between 06:00 and 23:30")
+	if _, err := time.Parse("15:04", p.TimeOfDay); err != nil {
+		return errors.New("time must be HH:MM")
 	}
 	return nil
 }

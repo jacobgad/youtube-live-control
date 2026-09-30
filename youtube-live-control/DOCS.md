@@ -2,7 +2,7 @@
 
 Runs a channel's scheduled YouTube live streams from Home Assistant.
 
-- **Schedule** from the dashboard: pick a **preset**, confirm date and time, press **Schedule**. Presets (title pattern, description, privacy, stream key, thumbnail, usual day and time) are set up once in the add-on's web UI, which is also where descriptions, thumbnails and off-pattern dates are edited.
+- **Schedule** from the dashboard: pick a **preset**, confirm the start in the native date-time picker, press **Schedule**. Presets (title pattern, description, privacy, stream key, thumbnail, usual day and time) are set up once in the add-on's web UI, which is also where descriptions, thumbnails and off-pattern dates are edited.
 - **Operate** on the day: a volunteer picks the stream (it's the first option), fixes the title if needed, presses **Go Live** once OBS is streaming and **End Stream** after the service. One **Stage** sensor says what to do next.
 
 ## Installation
@@ -13,7 +13,7 @@ Runs a channel's scheduled YouTube live streams from Home Assistant.
 4. Open the add-on's web UI — the **Open Web UI** button on the add-on's Info tab, or **YouTube Live** in the sidebar once *Show in sidebar* is on — and connect the channel's Google account once.
 5. Create a preset in the web UI, then schedule from the dashboard. Entities appear under **Settings → Devices & services → MQTT** as two devices: **YouTube Live** and **YouTube Live Scheduling**.
 
-Requires the **Mosquitto broker** add-on and the **MQTT integration**. Broker credentials are read from the Supervisor; there is nothing to enter.
+Requires Home Assistant **2026.5 or newer** (for the MQTT date-time entity), the **Mosquitto broker** add-on and the **MQTT integration**. Broker credentials are read from the Supervisor; there is nothing to enter.
 
 ## Google OAuth client
 
@@ -69,7 +69,7 @@ Open it from the add-on's Info tab or the sidebar. It is restricted to Home Assi
 | Name | e.g. *Sunday morning* |
 | Title | The broadcast title; `{date}` becomes the scheduled date, e.g. `Sunday Service – {date}` → *Sunday Service – 5 Jan 2025*. |
 | Description | Copied to each broadcast. |
-| Usual day & time | Pre-fills Date and Time with the next occurrence that isn't already taken, e.g. Sunday 09:30. Half-hour times between 06:00 and 23:30. |
+| Usual day & time | Pre-fills Start with the next occurrence that isn't already taken, e.g. Sunday 09:30. |
 | Privacy | public / unlisted / private. |
 | Stream key | Which of the channel's stream keys (YouTube Studio → *Stream settings*) the broadcast is bound to — the one OBS is configured with. A broadcast without a stream key can never go live. |
 | Thumbnail | JPEG/PNG up to 2 MB, uploaded to every broadcast scheduled from the preset. |
@@ -79,7 +79,7 @@ Presets are stored in `/data/presets/`.
 **Broadcasts** — lists upcoming and live broadcasts (with the one currently on the Home Assistant panel marked), and *Never started* ones — scheduled more than a day ago and still `ready`, hidden from the panel, with a **Delete** button to clean them up.
 
 - **Schedule a new stream** (the same thing the dashboard's Schedule button does, with a full form): choose a preset → the form is pre-filled → adjust anything, including an off-pattern date → **Schedule**. The add-on creates the broadcast with `enableAutoStart`/`enableAutoStop` off, binds the stream key, uploads the thumbnail and reads it back. It does not change the panel's selection.
-- **Edit** any broadcast: title, description, date-time (native picker; a changed time must be on the half hour, an untouched Studio time is kept as is), privacy, stream key (fix a Studio-made broadcast that shows *no stream key*), replace the thumbnail — or **Delete** it (asks for confirmation; a live broadcast must be ended first).
+- **Edit** any broadcast: title, description, date-time, privacy, stream key (fix a Studio-made broadcast that shows *no stream key*), replace the thumbnail — or **Delete** it (asks for confirmation; a live broadcast must be ended first).
 
 Every action goes through the same verified write → read back path as the panel, so the Home Assistant entities update the moment YouTube confirms.
 
@@ -108,12 +108,9 @@ Two MQTT devices. Home Assistant's auto-generated dashboard gives each its own c
 
 | Entity | Type | Behaviour |
 | --- | --- | --- |
-| **Preset** | select | Your presets by name; remembers the last one used. Choosing one resets Date and Time to its **next usual slot that isn't already taken** (if this Sunday 09:30 already has a stream, the Sunday after is offered). |
-| **Date** | select | The next four weeks, e.g. *Sun 5 Jan*. |
-| **Time** | select | Half-hour steps, 06:00–23:30. |
-| **Schedule** | button | Creates the broadcast at Date + Time with the preset's title (date substituted), description, privacy, stream key and thumbnail. Greyed while no preset is chosen, the preset has no stream key, or the slot is in the past. It does **not** change which broadcast the panel is on — pick it from **Broadcast** when you want it. |
-
-Times are half-hour everywhere — the panel, presets and the web UI's pickers.
+| **Preset** | select | Your presets by name; remembers the last one used. Choosing one resets **Start** to its **next usual slot that isn't already taken** (if this Sunday 09:30 already has a stream, the Sunday after is offered). |
+| **Start** | date-time | Home Assistant's native date-time picker (MQTT `datetime` entity, Home Assistant 2026.5 or newer). |
+| **Schedule** | button | Creates the broadcast at Start with the preset's title (date substituted), description, privacy, stream key and thumbnail. Greyed while no preset is chosen, the preset has no stream key, or Start is in the past. It does **not** change which broadcast the panel is on — pick it from **Broadcast** when you want it. |
 
 Invalid input (an empty title, a title over 100 characters, an unknown option) is rejected and the field snaps back.
 
@@ -173,8 +170,7 @@ cards:
     title: Schedule
     entities:
       - entity: select.youtube_live_scheduling_preset
-      - entity: select.youtube_live_scheduling_date
-      - entity: select.youtube_live_scheduling_time
+      - entity: datetime.youtube_live_scheduling_start
       - entity: button.youtube_live_scheduling_schedule
   - type: entities
     title: Selected broadcast
@@ -224,7 +220,8 @@ Budgeting: the separate list poll costs 2 units per cycle (~576/day at 5 minutes
 | "Google hasn't verified this app" warning | Expected for a published, unverified app. *Advanced → Go to … (unsafe)* continues. |
 | Go Live stays unavailable | Read **Stage**: `waiting_for_encoder` means OBS isn't streaming yet; `no_stream_key` means the broadcast has no stream key — fix it on the broadcast's edit page in the web UI. |
 | End Stream stays unavailable after stopping OBS | Stage `stream_stopping` is expected for up to a minute — `streamStatus` lags. Tap End Stream once (or flip **Fast refresh** on): the refused press arms the fast poll and the button enables as soon as Stage reaches `ready_to_end`. |
-| Schedule button is greyed | No preset chosen, the preset has no stream key (edit it in the web UI), or Date + Time is in the past. |
+| Schedule button is greyed | No preset chosen, the preset has no stream key (edit it in the web UI), or Start is in the past. |
+| No **Start** entity on the scheduling device | The MQTT date-time entity needs Home Assistant 2026.5 or newer. |
 | Sensors feel stale | The idle tier polls every 10 minutes. Touch anything on the panel or switch **Fast refresh** on for the 3-second cadence. |
 | `authorization_revoked` in log, Authorization `unauthorized` every week | The consent screen is still in **Testing**, where refresh tokens expire after 7 days. Press **Publish app** on the consent screen, then reconnect once. |
 | `quotaExceeded` errors | Daily quota exhausted; it resets at midnight Pacific. Raise the poll intervals. |

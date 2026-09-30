@@ -10,8 +10,6 @@ var testOrigin = Origin{Version: "test", SupportURL: "https://example.invalid"}
 var testOptions = Options{
 	Broadcasts: []string{"Sun 5 Jan 09:30 · Service"},
 	Presets:    []string{"Sunday"},
-	Dates:      []string{"Sun 5 Jan"},
-	Times:      []string{"09:30"},
 }
 
 func messagesByObject(t *testing.T) map[string]Message {
@@ -30,7 +28,7 @@ func TestMessagesCoverEveryEntityOnBothDevices(t *testing.T) {
 		"go_live", "end_stream", "fast_mode", "fast_mode_remaining",
 		"broadcast_status", "stream_health", "channel", "authorization",
 	}
-	scheduling := []string{"preset", "date", "time", "schedule"}
+	scheduling := []string{"preset", "start", "schedule"}
 	for _, object := range controller {
 		m, ok := byID[NodeID+"_"+object]
 		if !ok {
@@ -117,6 +115,10 @@ func TestPlatformNativeClasses(t *testing.T) {
 	if byID[NodeID+"_broadcast"].Payload["json_attributes_topic"] != BroadcastAttributes {
 		t.Fatal("broadcast select lacks attributes topic")
 	}
+	start := byID[SchedulingNodeID+"_start"]
+	if start.Topic != HADiscoveryTopic("datetime", SchedulingNodeID, "start") || start.Payload["command_topic"] != StartSet {
+		t.Fatal("start is not a core datetime entity")
+	}
 	if byID[NodeID+"_thumbnail"].Payload["url_topic"] != ThumbnailURLState || byID[NodeID+"_thumbnail"].Topic != HADiscoveryTopic("image", NodeID, "thumbnail") {
 		t.Fatal("thumbnail is not a core image entity")
 	}
@@ -132,8 +134,6 @@ func TestSelectsEmbedOptions(t *testing.T) {
 	for id, want := range map[string]string{
 		NodeID + "_broadcast":        "Sun 5 Jan 09:30 · Service",
 		SchedulingNodeID + "_preset": "Sunday",
-		SchedulingNodeID + "_date":   "Sun 5 Jan",
-		SchedulingNodeID + "_time":   "09:30",
 	} {
 		if opts := byID[id].Payload["options"].([]string); len(opts) != 1 || opts[0] != want {
 			t.Fatalf("%s options = %v", id, opts)

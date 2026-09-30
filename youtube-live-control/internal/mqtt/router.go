@@ -16,8 +16,7 @@ type Actions struct {
 	GoLivePressed       func()
 	EndPressed          func()
 	PresetSelected      func(label string)
-	DateSelected        func(label string)
-	TimeSelected        func(label string)
+	StartEntered        func(raw string)
 	SchedulePressed     func()
 	HomeAssistantOnline func()
 }
@@ -26,7 +25,7 @@ type Actions struct {
 var Subscriptions = []string{
 	BroadcastSet, TitleSet, PrivacySet, FastModeSet,
 	GoLivePress, EndPress,
-	PresetSet, DateSet, TimeSet, SchedulePress,
+	PresetSet, StartSet, SchedulePress,
 	HAStatusTopic,
 }
 
@@ -56,10 +55,8 @@ func NewRouter(actions Actions, log *slog.Logger) MessageHandler {
 			actions.EndPressed()
 		case PresetSet:
 			actions.PresetSelected(text)
-		case DateSet:
-			actions.DateSelected(text)
-		case TimeSet:
-			actions.TimeSelected(text)
+		case StartSet:
+			actions.StartEntered(text)
 		case SchedulePress:
 			actions.SchedulePressed()
 		case HAStatusTopic:

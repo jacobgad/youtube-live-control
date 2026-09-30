@@ -19,27 +19,27 @@ func TestPresetDefaultsSkipTakenSlots(t *testing.T) {
 	sc.presetID = "abc"
 
 	sc.applyDefaults(now, nil)
-	if sc.date.Day() != 5 || sc.timeOfDay != "09:30" {
-		t.Fatalf("defaults = %v %s", sc.date, sc.timeOfDay)
+	if sc.start.Day() != 5 || sc.start.Hour() != 9 || sc.start.Minute() != 30 {
+		t.Fatalf("default start = %v", sc.start)
 	}
-	firstSunday := sc.start()
+	firstSunday := sc.start
 	sc.applyDefaults(now, []time.Time{firstSunday})
-	if sc.date.Day() != 12 {
-		t.Fatalf("taken slot not skipped: %v", sc.date)
+	if sc.start.Day() != 12 {
+		t.Fatalf("taken slot not skipped: %v", sc.start)
 	}
 	if !sc.canSchedule(now) {
 		t.Fatal("a preset with a stream key and a future slot should be schedulable")
 	}
-	if sc.start().Hour() != 9 || sc.start().Minute() != 30 {
-		t.Fatalf("start = %v", sc.start())
+	if sc.startPayload() != sc.start.Format(time.RFC3339) {
+		t.Fatalf("payload = %q", sc.startPayload())
 	}
 }
 
 func TestScheduleGate(t *testing.T) {
 	now := time.Date(2025, 1, 1, 12, 0, 0, 0, time.Local)
 	sc := scheduling{}
-	if sc.canSchedule(now) {
-		t.Fatal("no preset must gate off")
+	if sc.canSchedule(now) || sc.startPayload() != mqttNone {
+		t.Fatal("no preset must gate off and publish None")
 	}
 	noKey := sundayPreset()
 	noKey.StreamID = ""
@@ -50,10 +50,26 @@ func TestScheduleGate(t *testing.T) {
 		t.Fatal("a preset without a stream key must gate off")
 	}
 	sc.setPresets([]preset.Preset{sundayPreset()})
-	sc.date = dayOf(now.AddDate(0, 0, -1))
-	sc.timeOfDay = "09:30"
+	sc.start = now.Add(-time.Hour)
 	if sc.canSchedule(now) {
 		t.Fatal("a past slot must gate off")
+	}
+}
+
+func TestParseStart(t *testing.T) {
+	for _, raw := range []string{"2025-01-05T09:30:00+10:00", "2025-01-05T09:30:00.123456+10:00", "2025-01-04T23:30:00Z"} {
+		if _, err := parseStart(raw); err != nil {
+			t.Fatalf("parseStart(%q): %v", raw, err)
+		}
+	}
+	got, _ := parseStart("2025-01-05T09:47:12+10:00")
+	if got.Second() != 0 || got.Minute() != 47 {
+		t.Fatalf("seconds should be truncated, minutes kept: %v", got)
+	}
+	for _, raw := range []string{"", "2025-01-05T09:30:00", "Sun 5 Jan", "09:30"} {
+		if _, err := parseStart(raw); err == nil {
+			t.Fatalf("parseStart(%q) accepted", raw)
+		}
 	}
 }
 
@@ -74,36 +90,6 @@ func TestPresetListChangesKeepOrDropSelection(t *testing.T) {
 	sc.setPresets(nil)
 	if opts := sc.presetOptions(); len(opts) != 1 || opts[0] != noPresetLabel {
 		t.Fatalf("empty options = %v", opts)
-	}
-}
-
-func TestDateAndTimeOptions(t *testing.T) {
-	now := time.Date(2025, 1, 1, 12, 0, 0, 0, time.Local)
-	sc := scheduling{}
-	opts := sc.dateOptions(now)
-	if len(opts) != dateWindowDays || opts[0] != "Wed 1 Jan" || opts[4] != "Sun 5 Jan" {
-		t.Fatalf("date options = %v", opts)
-	}
-	sc.date = dayOf(now.AddDate(0, 0, 40))
-	if opts := sc.dateOptions(now); len(opts) != dateWindowDays+1 || opts[dateWindowDays] != sc.date.Format(dateLabelFormat) {
-		t.Fatal("a chosen date beyond the window must be appended")
-	}
-	day, ok := sc.parseDateLabel("Sun 12 Jan", now)
-	if !ok || day.Day() != 12 || day.Month() != time.January {
-		t.Fatalf("parseDateLabel = %v %v", day, ok)
-	}
-	if _, ok := sc.parseDateLabel("Someday", now); ok {
-		t.Fatal("garbage label accepted")
-	}
-
-	times := timeOptions()
-	if times[0] != "06:00" || times[len(times)-1] != "23:30" || len(times) != 36 {
-		t.Fatalf("time options = %v", times)
-	}
-	for label, want := range map[string]bool{"09:30": true, "09:15": false, "05:30": false, "23:30": true, "x": false} {
-		if preset.ValidSlot(label) != want {
-			t.Fatalf("ValidSlot(%q) = %v", label, !want)
-		}
 	}
 }
 

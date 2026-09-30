@@ -53,10 +53,8 @@ const (
 
 	PresetState          = Prefix + "/preset/state"
 	PresetSet            = Prefix + "/preset/set"
-	DateState            = Prefix + "/date/state"
-	DateSet              = Prefix + "/date/set"
-	TimeState            = Prefix + "/time/state"
-	TimeSet              = Prefix + "/time/set"
+	StartState           = Prefix + "/start/state"
+	StartSet             = Prefix + "/start/set"
 	SchedulePress        = Prefix + "/schedule/press"
 	ScheduleAvailability = Prefix + "/schedule/availability"
 )
@@ -80,6 +78,8 @@ var RetiredConfigTopics = []string{
 	HADiscoveryTopic("button", NodeID, "save"),
 	HADiscoveryTopic("button", NodeID, "create"),
 	HADiscoveryTopic("sensor", NodeID, "viewers"),
+	HADiscoveryTopic("select", SchedulingNodeID, "date"),
+	HADiscoveryTopic("select", SchedulingNodeID, "time"),
 	HADiscoveryTopic("number", NodeID, "list_poll_minutes"),
 	HADiscoveryTopic("number", NodeID, "fast_poll_seconds"),
 	HADiscoveryTopic("number", NodeID, "fast_mode_minutes"),

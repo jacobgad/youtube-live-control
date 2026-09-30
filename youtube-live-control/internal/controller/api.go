@@ -95,27 +95,10 @@ func (e Edit) Validate() error {
 	return nil
 }
 
-// Half-hour slots are the rule for anything scheduled here; a start a producer did not
-// touch (a Studio-made 09:15 broadcast) is kept as it is.
-func (e Edit) validateSlot(existing time.Time) error {
-	if e.Start.Equal(existing) {
-		return nil
-	}
-	if e.Start.Minute()%30 != 0 || e.Start.Second() != 0 {
-		return errors.New("scheduled start must be on the hour or half hour")
-	}
-	return nil
-}
-
 // Update applies an Edit to a broadcast and returns the read-back result.
 func (c *Controller) Update(ctx context.Context, id string, edit Edit) (youtube.Broadcast, error) {
 	if err := edit.Validate(); err != nil {
 		return youtube.Broadcast{}, err
-	}
-	if existing, ok := c.cached(id); ok {
-		if err := edit.validateSlot(existing.ScheduledStart); err != nil {
-			return youtube.Broadcast{}, err
-		}
 	}
 	var result youtube.Broadcast
 	err := c.run(ctx, "web_update", func(ctx context.Context) error {
@@ -158,9 +141,6 @@ func (c *Controller) Create(ctx context.Context, req NewBroadcast) (youtube.Broa
 	if err := req.Validate(); err != nil {
 		return youtube.Broadcast{}, err
 	}
-	if err := req.validateSlot(time.Time{}); err != nil {
-		return youtube.Broadcast{}, err
-	}
 	var result youtube.Broadcast
 	err := c.run(ctx, "web_create", func(ctx context.Context) error {
 		b, err := c.createBroadcast(ctx, req)
@@ -172,9 +152,6 @@ func (c *Controller) Create(ctx context.Context, req NewBroadcast) (youtube.Broa
 
 func (c *Controller) createBroadcast(ctx context.Context, req NewBroadcast) (youtube.Broadcast, error) {
 	if err := req.Validate(); err != nil {
-		return youtube.Broadcast{}, err
-	}
-	if err := req.validateSlot(time.Time{}); err != nil {
 		return youtube.Broadcast{}, err
 	}
 	if req.StreamID == "" {

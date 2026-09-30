@@ -11,20 +11,15 @@ import (
 	"github.com/jacobgad/youtube-live-control/internal/preset"
 )
 
-const (
-	dateLabelFormat = "Mon 2 Jan"
-	dateWindowDays  = 28
-	noPresetLabel   = "No presets — create one in the web UI"
-)
+const noPresetLabel = "No presets — create one in the web UI"
 
-// scheduling is the state behind the YouTube Live Scheduling device. Date and time
-// are recomputed from the preset (never persisted) so a stale date cannot linger.
+// scheduling is the state behind the YouTube Live Scheduling device. The start is
+// recomputed from the preset (never persisted) so a stale date cannot linger.
 type scheduling struct {
-	presets   []preset.Preset
-	labels    []string
-	presetID  string
-	date      time.Time
-	timeOfDay string
+	presets  []preset.Preset
+	labels   []string
+	presetID string
+	start    time.Time
 }
 
 func (sc *scheduling) setPresets(list []preset.Preset) {
@@ -82,12 +77,10 @@ func (sc *scheduling) presetIDForLabel(label string) (string, bool) {
 func (sc *scheduling) applyDefaults(now time.Time, taken []time.Time) {
 	p := sc.preset()
 	if p == nil {
-		sc.date, sc.timeOfDay = time.Time{}, ""
+		sc.start = time.Time{}
 		return
 	}
-	start := nextFreeSlot(*p, now, taken)
-	sc.date = dayOf(start)
-	sc.timeOfDay = start.Format("15:04")
+	sc.start = nextFreeSlot(*p, now, taken)
 }
 
 func nextFreeSlot(p preset.Preset, now time.Time, taken []time.Time) time.Time {
@@ -110,65 +103,24 @@ func slotTaken(start time.Time, taken []time.Time) bool {
 	return false
 }
 
-func dayOf(t time.Time) time.Time {
-	t = t.Local()
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
+// startPayload is what the datetime entity expects: ISO 8601 with an offset, or
+// Home Assistant's null payload while unset.
+func (sc *scheduling) startPayload() string {
+	if sc.start.IsZero() {
+		return mqttNone
+	}
+	return sc.start.Format(time.RFC3339)
 }
 
-// The chosen date is appended when the free-slot search lands beyond the window.
-func (sc *scheduling) dateOptions(now time.Time) []string {
-	today := dayOf(now)
-	options := make([]string, 0, dateWindowDays+1)
-	included := false
-	for i := range dateWindowDays {
-		day := today.AddDate(0, 0, i)
-		if day.Equal(sc.date) {
-			included = true
-		}
-		options = append(options, day.Format(dateLabelFormat))
-	}
-	if !sc.date.IsZero() && !included && sc.date.After(today) {
-		options = append(options, sc.date.Format(dateLabelFormat))
-	}
-	return options
-}
-
-func (sc *scheduling) dateLabel() string {
-	if sc.date.IsZero() {
-		return ""
-	}
-	return sc.date.Format(dateLabelFormat)
-}
-
-// Labels carry no year, so a label is resolved by scanning forward from today.
-func (sc *scheduling) parseDateLabel(label string, now time.Time) (time.Time, bool) {
-	today := dayOf(now)
-	for i := range dateWindowDays + 366 {
-		day := today.AddDate(0, 0, i)
-		if day.Format(dateLabelFormat) == label {
-			return day, true
+// parseStart accepts the datetime entity's command payload (isoformat of an aware
+// datetime, with or without fractional seconds).
+func parseStart(raw string) (time.Time, error) {
+	for _, layout := range []string{time.RFC3339Nano, time.RFC3339, "2006-01-02T15:04:05.999999-07:00", "2006-01-02T15:04-07:00"} {
+		if t, err := time.Parse(layout, raw); err == nil {
+			return t.Truncate(time.Minute), nil
 		}
 	}
-	return time.Time{}, false
-}
-
-func timeOptions() []string {
-	options := make([]string, 0, int((preset.LastSlot-preset.FirstSlot)/preset.SlotStep)+1)
-	for d := preset.FirstSlot; d <= preset.LastSlot; d += preset.SlotStep {
-		options = append(options, time.Date(0, 1, 1, 0, 0, 0, 0, time.UTC).Add(d).Format("15:04"))
-	}
-	return options
-}
-
-func (sc *scheduling) start() time.Time {
-	if sc.date.IsZero() || sc.timeOfDay == "" {
-		return time.Time{}
-	}
-	tod, err := time.Parse("15:04", sc.timeOfDay)
-	if err != nil {
-		return time.Time{}
-	}
-	return time.Date(sc.date.Year(), sc.date.Month(), sc.date.Day(), tod.Hour(), tod.Minute(), 0, 0, sc.date.Location())
+	return time.Time{}, fmt.Errorf("%q is not an ISO 8601 date-time with a timezone", raw)
 }
 
 func (sc *scheduling) canSchedule(now time.Time) bool {
@@ -176,8 +128,7 @@ func (sc *scheduling) canSchedule(now time.Time) bool {
 	if p == nil || p.StreamID == "" {
 		return false
 	}
-	start := sc.start()
-	return !start.IsZero() && start.After(now)
+	return !sc.start.IsZero() && sc.start.After(now)
 }
 
 type persistedState struct {

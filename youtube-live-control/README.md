@@ -2,7 +2,7 @@
 
 Home Assistant add-on that runs a channel's scheduled YouTube live streams. Producers schedule from presets in the web UI; volunteers go live and end from one MQTT panel.
 
-- **Scheduling device**: Preset · Date · Time · Schedule — creates the preset's broadcast at the chosen half-hour slot
+- **Scheduling device**: Preset · Start (native date-time picker) · Schedule — creates the preset's broadcast
 - **Selected-broadcast device**: Broadcast select (soonest first), Title and Privacy applied immediately, a **Stage** enum sensor, Scheduled start timestamp, Live / Encoder connected binary sensors, Go Live / End Stream
 - **Web UI**: presets (title pattern, description, privacy, stream key, thumbnail, usual day/time), edit broadcasts, off-pattern scheduling
 - OAuth 2.0 (`youtube.force-ssl`) against your own Google client; consent once in the ingress web UI, refresh token kept in `/data`
