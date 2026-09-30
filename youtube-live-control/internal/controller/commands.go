@@ -134,17 +134,21 @@ func (c *Controller) endStream(ctx context.Context) error {
 	return nil
 }
 
-// A live or transitioning broadcast is never deleted from the panel; end it first.
 func (c *Controller) deleteSelected(ctx context.Context) error {
 	id, b, _, ok := c.verifySelected(ctx, "delete")
 	if !ok {
 		return ErrNoSelection
 	}
-	if isLive(b) || b.LifeCycleStatus == youtube.LifeLiveStarting {
+	if isLive(b) {
 		c.log.Warn("command_refused", "command", "delete", "id", id, "lifeCycleStatus", b.LifeCycleStatus)
 		c.pub.update(ctx, c.snapshot)
 		return errors.New("broadcast is live")
 	}
+	return c.deleteBroadcast(ctx, id)
+}
+
+// A vanished broadcast counts as deleted so a stale list cannot make Delete fail.
+func (c *Controller) deleteBroadcast(ctx context.Context, id string) error {
 	if err := c.yt.DeleteBroadcast(ctx, id); err != nil && !youtube.HasReason(err, "liveBroadcastNotFound") {
 		c.log.Error("operation_failed", "operation", "delete", "id", id, "error", err)
 		return err

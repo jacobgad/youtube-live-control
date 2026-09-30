@@ -357,7 +357,7 @@ func (c *Controller) snapshot() snapshot {
 		presetLabel:   c.session.sched.presetLabel(),
 		start:         c.session.sched.startPayload(),
 		schedPrivacy:  c.session.sched.privacy,
-		canDelete:     c.session.authorized && b != nil && !c.busy["delete"] && !isOnAir(current) && current != stageStarting && current != stageEnding,
+		canDelete:     canDelete(c.session.authorized, current, c.busy["delete"]),
 		canSchedule:   c.session.authorized && !c.busy["schedule"] && c.session.sched.canSchedule(now),
 	}
 	if b != nil {
@@ -538,9 +538,6 @@ func (c *Controller) schedulePressed() {
 		c.log.Warn("command_refused", "command", "schedule", "reason", "gate_closed")
 		c.publishUpdate()
 		return
-	}
-	if privacy == "" {
-		privacy = p.Privacy
 	}
 	req := NewBroadcast{Edit: Edit{Title: p.Title(start), Description: p.Description, Start: start, Privacy: privacy, StreamID: p.StreamID, CategoryID: p.CategoryID}}
 	if p.ImageID != "" {

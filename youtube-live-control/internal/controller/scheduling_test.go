@@ -106,10 +106,28 @@ func TestClearAfterSchedule(t *testing.T) {
 	sc.setPresets([]preset.Preset{sundayPreset()})
 	sc.presetID = "abc"
 	sc.applyDefaults(now, nil)
+	if sc.privacy != "public" {
+		t.Fatalf("privacy should follow the preset, got %q", sc.privacy)
+	}
 	sc.clear()
-	if sc.presetID != "" || !sc.start.IsZero() || sc.canSchedule(now) || sc.presetLabel() != noPresetLabel {
+	if sc.presetID != "" || !sc.start.IsZero() || sc.privacy != "" || sc.canSchedule(now) || sc.presetLabel() != noPresetLabel {
 		t.Fatalf("not cleared: %+v", sc)
 	}
+}
+
+func TestSelectSchedulePrivacySnapsBackOnInvalid(t *testing.T) {
+	c := &Controller{now: time.Now, opts: testOptions, log: slog.Default(), pub: newPublisher(nullConn{}, mqtt.Origin{}, slog.Default())}
+	c.lifetime, c.endLife = context.WithCancel(context.Background())
+	defer c.endLife()
+	c.selectSchedulePrivacy("secret")
+	if c.session.sched.privacy != "" {
+		t.Fatal("invalid privacy must not be stored")
+	}
+	c.selectSchedulePrivacy("unlisted")
+	if c.session.sched.privacy != "unlisted" {
+		t.Fatal("valid privacy must be stored")
+	}
+	c.inflight.Wait()
 }
 
 func TestPresetListChangesKeepOrDropSelection(t *testing.T) {

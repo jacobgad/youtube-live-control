@@ -212,15 +212,7 @@ func (c *Controller) Delete(ctx context.Context, id string) error {
 	if b, ok := c.cached(id); ok && isLive(b) {
 		return errors.New("the broadcast is live; end the stream before deleting it")
 	}
-	return c.run(ctx, "web_delete", func(ctx context.Context) error {
-		if err := c.yt.DeleteBroadcast(ctx, id); err != nil && !youtube.HasReason(err, "liveBroadcastNotFound") {
-			c.log.Error("operation_failed", "operation", "delete", "id", id, "error", err)
-			return err
-		}
-		c.log.Info("broadcast_deleted", "id", id)
-		c.dropMissing(ctx, id)
-		return nil
-	})
+	return c.run(ctx, "web_delete", func(ctx context.Context) error { return c.deleteBroadcast(ctx, id) })
 }
 
 // SetThumbnail uploads a thumbnail for a broadcast.

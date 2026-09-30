@@ -92,6 +92,22 @@ func TestGatesFollowStage(t *testing.T) {
 	}
 }
 
+func TestCanDelete(t *testing.T) {
+	for _, s := range []string{stageWaitingForEncoder, stageReadyToGoLive, stageNoStreamKey, stageEnded} {
+		if !canDelete(true, s, false) {
+			t.Fatalf("%s should allow delete", s)
+		}
+	}
+	for _, s := range []string{stageLive, stageStreamStopping, stageReadyToEnd, stageStarting, stageEnding, stageNoBroadcast} {
+		if canDelete(true, s, false) {
+			t.Fatalf("%s must refuse delete", s)
+		}
+	}
+	if canDelete(false, stageReadyToGoLive, false) || canDelete(true, stageReadyToGoLive, true) {
+		t.Fatal("unauthorized or in-flight must refuse delete")
+	}
+}
+
 func TestSetBroadcastsNeverSelectsAndHidesStale(t *testing.T) {
 	now := time.Date(2025, 1, 4, 12, 0, 0, 0, time.Local)
 	next := youtube.Broadcast{ID: "next", Title: "This Sunday", ScheduledStart: now.Add(21 * time.Hour), LifeCycleStatus: youtube.LifeReady}

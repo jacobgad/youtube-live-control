@@ -245,6 +245,13 @@ func computeGates(authorized bool, current string, goLiveBusy, endBusy bool) gat
 	return gates{goLive: current == stageReadyToGoLive && !goLiveBusy, end: current == stageReadyToEnd && !endBusy}
 }
 
+func canDelete(authorized bool, current string, busy bool) bool {
+	if !authorized || busy || current == stageNoBroadcast {
+		return false
+	}
+	return !isOnAir(current) && current != stageStarting && current != stageEnding
+}
+
 func isOnAir(current string) bool {
 	return current == stageLive || current == stageStreamStopping || current == stageReadyToEnd
 }
