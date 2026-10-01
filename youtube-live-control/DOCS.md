@@ -59,7 +59,7 @@ Pick a **Preset** — **Start** jumps to its next free usual slot and **Privacy*
 1. Pick the stream in **Broadcast** (sorted live-first, then soonest — the right one is first). Nothing is ever selected for you.
 2. Edit **Title** or **Privacy** if needed; each change is written to YouTube immediately and the field updates once YouTube confirms.
 3. Start OBS. **Stage** goes `waiting_for_encoder` → `ready_to_go_live`; press **Go Live**.
-4. After the service stop OBS. **Stage** shows `stream_stopping` while YouTube catches up (up to a minute), then `ready_to_end`; press **End Stream**.
+4. After the service stop OBS. **Stage** shows `stream_stopping` while YouTube catches up (up to a minute), then `ready_to_end`; press **End Stream**. The broadcast leaves the panel and the selection clears — the same confirmation Schedule and Delete give.
 
 | Stage | Meaning |
 | --- | --- |
@@ -71,7 +71,7 @@ Pick a **Preset** — **Start** jumps to its next free usual slot and **Privacy*
 | `live` | on air |
 | `stream_stopping` | OBS stopped; YouTube has not registered it yet |
 | `ready_to_end` | stream stopped — **End Stream** available |
-| `ended` | complete |
+| `ended` | complete (seen only for broadcasts ended outside the add-on) |
 
 ### Web UI
 

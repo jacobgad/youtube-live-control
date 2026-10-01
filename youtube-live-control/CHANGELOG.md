@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.9.2
+
+- End Stream now clears the panel immediately on completion, matching Schedule and Delete, instead of leaving the finished broadcast selected until the next list poll.
+
 ## 1.9.1
 
 - Fix: the Preset select did not clear after Schedule, and the Broadcast select kept a stale selection after End Stream or Delete. "Nothing selected" was published as a placeholder label that is not one of the options, which Home Assistant ignores; it is now published as `None`. Re-picking the apparently still-selected preset sent no command, which is why Start and Privacy then stayed empty.

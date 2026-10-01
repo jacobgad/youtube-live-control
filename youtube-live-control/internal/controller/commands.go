@@ -131,6 +131,9 @@ func (c *Controller) endStream(ctx context.Context) error {
 		return errors.New("broadcast did not reach complete")
 	}
 	c.log.Info("broadcast_completed", "id", id)
+	// A finished broadcast leaves the panel at once, the same done-signal Schedule
+	// and Delete give, rather than lingering until the list poll drops it.
+	c.dropMissing(ctx, id)
 	return nil
 }
 
