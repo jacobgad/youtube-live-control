@@ -20,10 +20,11 @@ const publishTimeout = 5 * time.Second
 // sensor is logged as an invalid state instead.
 const mqttNone = "None"
 
-type snapshot struct {
-	authorized     bool
-	channel        string
-	options        mqtt.Options
+type deviceSnap struct {
+	deviceID       string
+	name           string
+	streamKey      string
+	options        []string
 	selectedLabel  string
 	attributes     string
 	title          string
@@ -35,15 +36,23 @@ type snapshot struct {
 	encoder        bool
 	health         string
 	status         string
-	fastMode       bool
-	fastRemaining  int
 	unlocked       bool
 	gates          gates
 	canDelete      bool
-	presetLabel    string
-	start          string
-	schedPrivacy   string
-	canSchedule    bool
+}
+
+type snapshot struct {
+	authorized    bool
+	channel       string
+	fastMode      bool
+	fastRemaining int
+	devices       []deviceSnap
+	presets       []string
+	presetLabel   string
+	start         string
+	schedPrivacy  string
+	schedUnlocked bool
+	canSchedule   bool
 }
 
 type message struct {
@@ -89,6 +98,29 @@ func (p *publisher) invalidate(topics ...string) {
 	}
 }
 
+// retire wipes a vanished stream key's device off the broker: emptied configs remove
+// the entities from Home Assistant, emptied states leave no retained garbage behind.
+// Only fully wiped devices are returned; the caller keeps the rest for retry.
+func (p *publisher) retire(ctx context.Context, deviceIDs []string) (retired []string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, id := range deviceIDs {
+		topics := append(mqtt.StreamConfigTopics(id), mqtt.StreamTopics{Device: id}.StateTopics()...)
+		wiped := true
+		for _, t := range topics {
+			if p.publish(ctx, t, "") {
+				delete(p.last, t)
+			} else {
+				wiped = false
+			}
+		}
+		if wiped {
+			retired = append(retired, id)
+		}
+	}
+	return retired
+}
+
 // controllerOffline skips mu on purpose: Stop calls it under a deadline and must not
 // queue behind a sweep that is still waiting on the broker.
 func (p *publisher) controllerOffline(ctx context.Context) {
@@ -107,8 +139,12 @@ func (p *publisher) send(ctx context.Context, snap snapshot) {
 }
 
 func render(snap snapshot, origin mqtt.Origin) []message {
-	configs := mqtt.Messages(origin, snap.options)
-	out := make([]message, 0, 1+len(configs)+len(mqtt.RetiredConfigTopics)+24)
+	opts := mqtt.Options{Presets: snap.presets}
+	for _, d := range snap.devices {
+		opts.Streams = append(opts.Streams, mqtt.StreamDevice{DeviceID: d.deviceID, Name: d.name, Broadcasts: d.options})
+	}
+	configs := mqtt.Messages(origin, opts)
+	out := make([]message, 0, 1+len(configs)+len(mqtt.RetiredConfigTopics)+len(mqtt.RetiredStateTopics)+24*len(snap.devices)+16)
 	out = append(out, message{mqtt.ControllerAvailability, mqtt.PayloadOnline})
 	for _, m := range configs {
 		out = append(out, message{m.Topic, m.JSON()})
@@ -116,33 +152,48 @@ func render(snap snapshot, origin mqtt.Origin) []message {
 	for _, topic := range mqtt.RetiredConfigTopics {
 		out = append(out, message{topic, ""})
 	}
+	for _, topic := range mqtt.RetiredStateTopics {
+		out = append(out, message{topic, ""})
+	}
 	out = append(out,
-		message{mqtt.Lock, onOff(snap.unlocked, mqtt.PayloadOnline, mqtt.PayloadOffline)},
 		message{mqtt.AuthState, onOff(snap.authorized, mqtt.PayloadAuthorized, mqtt.PayloadUnauthorized)},
 		message{mqtt.ChannelState, snap.channel},
-		message{mqtt.BroadcastState, snap.selectedLabel},
-		message{mqtt.BroadcastAttributes, snap.attributes},
-		message{mqtt.TitleState, snap.title},
-		message{mqtt.PrivacyState, snap.privacy},
-		message{mqtt.ScheduledStartState, cmp.Or(snap.scheduledStart, mqttNone)},
-		message{mqtt.ThumbnailURLState, snap.thumbnailURL},
-		message{mqtt.ThumbnailAvail, onOff(snap.thumbnailURL != "", mqtt.PayloadOnline, mqtt.PayloadOffline)},
-		message{mqtt.StageState, snap.stage},
-		message{mqtt.LiveState, onOff(snap.live, mqtt.PayloadOn, mqtt.PayloadOff)},
-		message{mqtt.EncoderState, onOff(snap.encoder, mqtt.PayloadOn, mqtt.PayloadOff)},
 		message{mqtt.FastModeState, onOff(snap.fastMode, mqtt.PayloadOn, mqtt.PayloadOff)},
 		message{mqtt.FastRemainingState, strconv.Itoa(snap.fastRemaining)},
-		message{mqtt.HealthState, snap.health},
-		message{mqtt.StatusState, snap.status},
-		message{mqtt.GoLiveAvailability, onOff(snap.gates.goLive, mqtt.PayloadOnline, mqtt.PayloadOffline)},
-		message{mqtt.EndAvailability, onOff(snap.gates.end, mqtt.PayloadOnline, mqtt.PayloadOffline)},
-		message{mqtt.DeleteAvailability, onOff(snap.canDelete, mqtt.PayloadOnline, mqtt.PayloadOffline)},
+	)
+	for _, d := range snap.devices {
+		out = append(out, renderDevice(d)...)
+	}
+	return append(out,
+		message{mqtt.SchedulingLock, onOff(snap.schedUnlocked, mqtt.PayloadOnline, mqtt.PayloadOffline)},
 		message{mqtt.PresetState, snap.presetLabel},
 		message{mqtt.StartState, snap.start},
 		message{mqtt.SchedulePrivacyState, snap.schedPrivacy},
 		message{mqtt.ScheduleAvailability, onOff(snap.canSchedule, mqtt.PayloadOnline, mqtt.PayloadOffline)},
 	)
-	return out
+}
+
+func renderDevice(d deviceSnap) []message {
+	t := mqtt.StreamTopics{Device: d.deviceID}
+	return []message{
+		{t.Lock(), onOff(d.unlocked, mqtt.PayloadOnline, mqtt.PayloadOffline)},
+		{t.BroadcastState(), d.selectedLabel},
+		{t.BroadcastAttributes(), d.attributes},
+		{t.TitleState(), d.title},
+		{t.PrivacyState(), d.privacy},
+		{t.ScheduledStartState(), cmp.Or(d.scheduledStart, mqttNone)},
+		{t.ThumbnailURLState(), d.thumbnailURL},
+		{t.ThumbnailAvail(), onOff(d.thumbnailURL != "", mqtt.PayloadOnline, mqtt.PayloadOffline)},
+		{t.StageState(), d.stage},
+		{t.LiveState(), onOff(d.live, mqtt.PayloadOn, mqtt.PayloadOff)},
+		{t.EncoderState(), onOff(d.encoder, mqtt.PayloadOn, mqtt.PayloadOff)},
+		{t.HealthState(), d.health},
+		{t.StatusState(), d.status},
+		{t.StreamKeyState(), d.streamKey},
+		{t.GoLiveAvailability(), onOff(d.gates.goLive, mqtt.PayloadOnline, mqtt.PayloadOffline)},
+		{t.EndAvailability(), onOff(d.gates.end, mqtt.PayloadOnline, mqtt.PayloadOffline)},
+		{t.DeleteAvailability(), onOff(d.canDelete, mqtt.PayloadOnline, mqtt.PayloadOffline)},
+	}
 }
 
 func onOff(v bool, on, off string) string {

@@ -68,13 +68,16 @@ type Broadcast struct {
 	parts           rawParts
 }
 
-// Stream is a liveStream resource: the encoder's stream key and its ingestion settings.
+// Stream is a liveStream resource: the encoder's stream key, its ingestion settings
+// and its current ingestion state.
 type Stream struct {
 	ID         string
 	Title      string
 	StreamKey  string
 	Resolution string
 	FrameRate  string
+	IsDefault  bool
+	Status     StreamStatus
 }
 
 // An update PUT overwrites every mutable field of each part sent; echoing the fetched
@@ -330,7 +333,8 @@ func (c *Client) Bind(ctx context.Context, broadcastID, streamID string) error {
 type streamItem struct {
 	ID      string `json:"id"`
 	Snippet struct {
-		Title string `json:"title"`
+		Title           string `json:"title"`
+		IsDefaultStream bool   `json:"isDefaultStream"`
 	} `json:"snippet"`
 	CDN struct {
 		Resolution    string `json:"resolution"`
@@ -367,11 +371,11 @@ func (c *Client) StreamStatus(ctx context.Context, streamID string) (StreamStatu
 	return StreamStatus{Status: out.Items[0].Status.StreamStatus, Health: out.Items[0].Status.HealthStatus.Status}, nil
 }
 
-// ListStreams lists the channel's stream keys. Costs 1 quota unit.
+// ListStreams lists the channel's stream keys with their ingestion status. Costs 1 quota unit.
 func (c *Client) ListStreams(ctx context.Context) ([]Stream, error) {
 	var out streamListResponse
 	err := c.do(ctx, http.MethodGet, apiBase+"/liveStreams", url.Values{
-		"part":       {"id,snippet,cdn"},
+		"part":       {"id,snippet,cdn,status"},
 		"mine":       {"true"},
 		"maxResults": {"50"},
 	}, nil, &out)
@@ -386,6 +390,8 @@ func (c *Client) ListStreams(ctx context.Context) ([]Stream, error) {
 			StreamKey:  item.CDN.IngestionInfo.StreamName,
 			Resolution: item.CDN.Resolution,
 			FrameRate:  item.CDN.FrameRate,
+			IsDefault:  item.Snippet.IsDefaultStream,
+			Status:     StreamStatus{Status: item.Status.StreamStatus, Health: item.Status.HealthStatus.Status},
 		})
 	}
 	return streams, nil

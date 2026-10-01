@@ -13,6 +13,9 @@ func broadcast(lifecycle string) *youtube.Broadcast {
 	return &youtube.Broadcast{ID: "b1", Title: "Sunday Service", LifeCycleStatus: lifecycle, BoundStreamID: "s1"}
 }
 
+func mainKey() youtube.Stream  { return youtube.Stream{ID: "s1", Title: "Main Auditorium"} }
+func youthKey() youtube.Stream { return youtube.Stream{ID: "s2", Title: "Youth Hall"} }
+
 func TestStage(t *testing.T) {
 	active := youtube.StreamStatus{Status: youtube.StreamActive, Health: "good"}
 	noData := youtube.StreamStatus{Status: youtube.StreamActive, Health: "noData"}
@@ -102,38 +105,121 @@ func TestCanDelete(t *testing.T) {
 	}
 }
 
-func TestSetBroadcastsNeverSelectsAndHidesStale(t *testing.T) {
+func TestSetAllPartitionsByBindingAndNeverSelects(t *testing.T) {
 	now := time.Date(2025, 1, 4, 12, 0, 0, 0, time.Local)
-	next := youtube.Broadcast{ID: "next", Title: "This Sunday", ScheduledStart: now.Add(21 * time.Hour), LifeCycleStatus: youtube.LifeReady}
-	later := youtube.Broadcast{ID: "later", Title: "Next Sunday", ScheduledStart: now.Add(8 * 24 * time.Hour), LifeCycleStatus: youtube.LifeReady}
-	stale := youtube.Broadcast{ID: "old", Title: "Never started", ScheduledStart: now.Add(-3 * 24 * time.Hour), LifeCycleStatus: youtube.LifeReady}
+	onMain := youtube.Broadcast{ID: "next", Title: "This Sunday", BoundStreamID: "s1", ScheduledStart: now.Add(21 * time.Hour), LifeCycleStatus: youtube.LifeReady}
+	onYouth := youtube.Broadcast{ID: "youth", Title: "Youth Night", BoundStreamID: "s2", ScheduledStart: now.Add(30 * time.Hour), LifeCycleStatus: youtube.LifeReady}
+	unbound := youtube.Broadcast{ID: "loose", Title: "No key yet", ScheduledStart: now.Add(48 * time.Hour), LifeCycleStatus: youtube.LifeReady}
+	stale := youtube.Broadcast{ID: "old", Title: "Never started", BoundStreamID: "s1", ScheduledStart: now.Add(-3 * 24 * time.Hour), LifeCycleStatus: youtube.LifeReady}
+	defaultKey := youtube.Stream{ID: "sd", Title: "Default stream key", IsDefault: true}
 
 	s := session{}
-	if lost := s.setBroadcasts([]youtube.Broadcast{next, later, stale}, now); lost || s.selectedID != "" {
-		t.Fatalf("selection must stay empty until a human picks; got %q", s.selectedID)
+	lost := s.setAll([]youtube.Stream{youthKey(), mainKey(), defaultKey}, []youtube.Broadcast{onMain, onYouth, unbound, stale}, now)
+	if len(lost) != 0 {
+		t.Fatalf("nothing was selected, nothing can be lost: %v", lost)
 	}
-	if len(s.broadcasts) != 2 || len(s.stale) != 1 || s.stale[0].ID != "old" {
-		t.Fatalf("visible %d stale %d", len(s.broadcasts), len(s.stale))
+	if len(s.devices) != 2 {
+		t.Fatalf("default keys must not become devices: %d", len(s.devices))
 	}
-	if s.selectedLabel() != mqttNone || s.selectOptions()[0] != s.labels[0] {
-		t.Fatalf("label %q options %v", s.selectedLabel(), s.selectOptions())
+	if s.devices[0].stream.ID != "s1" || s.devices[1].stream.ID != "s2" {
+		t.Fatalf("devices must sort by key title: %s, %s", s.devices[0].stream.ID, s.devices[1].stream.ID)
+	}
+	main := s.device(mqtt.DeviceID("s1"))
+	if main == nil || len(main.broadcasts) != 1 || main.broadcasts[0].ID != "next" {
+		t.Fatalf("main device broadcasts = %+v", main)
+	}
+	if main.selectedID != "" || main.selectedLabel() != mqttNone {
+		t.Fatal("selection must stay empty until a human picks")
+	}
+	if len(s.unbound) != 1 || s.unbound[0].ID != "loose" {
+		t.Fatalf("unbound = %+v", s.unbound)
+	}
+	if len(s.stale) != 1 || s.stale[0].ID != "old" {
+		t.Fatalf("stale = %+v", s.stale)
+	}
+	if len(s.allBroadcasts()) != 3 {
+		t.Fatalf("allBroadcasts = %+v", s.allBroadcasts())
+	}
+	if len(s.allStarts()) != 4 {
+		t.Fatalf("allStarts should include stale and unbound: %d", len(s.allStarts()))
+	}
+}
+
+func TestSetAllKeepsOrLosesSelectionPerDevice(t *testing.T) {
+	now := time.Now()
+	onMain := youtube.Broadcast{ID: "b1", Title: "Service", BoundStreamID: "s1", ScheduledStart: now.Add(2 * time.Hour), LifeCycleStatus: youtube.LifeReady}
+	onYouth := youtube.Broadcast{ID: "b2", Title: "Youth", BoundStreamID: "s2", ScheduledStart: now.Add(3 * time.Hour), LifeCycleStatus: youtube.LifeReady}
+
+	s := session{}
+	s.setAll([]youtube.Stream{mainKey(), youthKey()}, []youtube.Broadcast{onMain, onYouth}, now)
+	s.device(mqtt.DeviceID("s1")).selectedID = "b1"
+	s.device(mqtt.DeviceID("s2")).selectedID = "b2"
+
+	if lost := s.setAll([]youtube.Stream{mainKey(), youthKey()}, []youtube.Broadcast{onMain, onYouth}, now); len(lost) != 0 {
+		t.Fatalf("selections must survive a refresh that still lists them: %v", lost)
+	}
+	lost := s.setAll([]youtube.Stream{mainKey(), youthKey()}, []youtube.Broadcast{onYouth}, now)
+	if len(lost) != 1 || lost[0] != mqtt.DeviceID("s1") {
+		t.Fatalf("main's selection must clear when its broadcast vanishes: %v", lost)
+	}
+	if s.device(mqtt.DeviceID("s2")).selectedID != "b2" {
+		t.Fatal("youth's selection must survive main's loss")
+	}
+	if opts := s.device(mqtt.DeviceID("s1")).selectOptions(); len(opts) != 1 || opts[0] != noBroadcastLabel {
+		t.Fatalf("empty options = %v", opts)
+	}
+}
+
+func TestSetAllRetiresVanishedKeysButKeepsSelectionOnSurvivors(t *testing.T) {
+	now := time.Now()
+	onMain := youtube.Broadcast{ID: "b1", Title: "Service", BoundStreamID: "s1", ScheduledStart: now.Add(2 * time.Hour), LifeCycleStatus: youtube.LifeReady}
+
+	s := session{}
+	s.setAll([]youtube.Stream{mainKey(), youthKey()}, []youtube.Broadcast{onMain}, now)
+	s.device(mqtt.DeviceID("s1")).selectedID = "b1"
+	s.setAll([]youtube.Stream{mainKey()}, []youtube.Broadcast{onMain}, now)
+	if len(s.devices) != 1 {
+		t.Fatalf("devices = %d", len(s.devices))
+	}
+	if s.device(mqtt.DeviceID("s1")).selectedID != "b1" {
+		t.Fatal("selection must survive another key's removal")
+	}
+}
+
+func TestApplyMovesBroadcastBetweenDevices(t *testing.T) {
+	now := time.Now()
+	b := youtube.Broadcast{ID: "b1", Title: "Service", BoundStreamID: "s1", ScheduledStart: now.Add(2 * time.Hour), LifeCycleStatus: youtube.LifeReady}
+
+	s := session{}
+	s.setAll([]youtube.Stream{mainKey(), youthKey()}, []youtube.Broadcast{b}, now)
+	s.device(mqtt.DeviceID("s1")).selectedID = "b1"
+
+	b.Title = "Renamed"
+	s.apply(b)
+	main := s.device(mqtt.DeviceID("s1"))
+	if main.broadcasts[0].Title != "Renamed" || main.selectedID != "b1" {
+		t.Fatal("an in-place update must keep the selection")
 	}
 
-	s.selectedID = "next"
-	if lost := s.setBroadcasts([]youtube.Broadcast{next, later}, now); lost || s.selectedID != "next" {
-		t.Fatal("selection must survive a refresh that still lists it")
+	b.BoundStreamID = "s2"
+	s.apply(b)
+	if len(main.broadcasts) != 0 || main.selectedID != "" {
+		t.Fatalf("rebinding away must clear the old device: %+v", main)
 	}
-	if lost := s.setBroadcasts([]youtube.Broadcast{later}, now); !lost || s.selectedID != "" {
-		t.Fatalf("selection must clear when the broadcast vanishes; got %q", s.selectedID)
+	youth := s.device(mqtt.DeviceID("s2"))
+	if len(youth.broadcasts) != 1 || youth.selectedID != "" {
+		t.Fatalf("the new device gains the broadcast unselected: %+v", youth)
 	}
-	if lost := s.setBroadcasts(nil, now); lost {
-		t.Fatal("clearing an already-empty selection is not a loss")
+
+	b.BoundStreamID = ""
+	s.apply(b)
+	if len(youth.broadcasts) != 0 || len(s.unbound) != 1 {
+		t.Fatal("unbinding must move the broadcast to unbound")
 	}
-	if opts := s.selectOptions(); len(opts) != 1 || opts[0] != noBroadcastLabel || s.selectedLabel() != mqttNone {
-		t.Fatalf("empty options = %v, label %q", opts, s.selectedLabel())
-	}
-	if len(s.allStarts()) != 0 {
-		t.Fatal("allStarts should be empty")
+
+	s.removeBroadcast("b1")
+	if len(s.unbound) != 0 {
+		t.Fatal("removeBroadcast must clear unbound too")
 	}
 }
 
@@ -162,12 +248,12 @@ func TestBroadcastLabelsDeduplicate(t *testing.T) {
 	if labels[2] != "Untimed" {
 		t.Fatalf("zero-time label = %q", labels[2])
 	}
-	s := session{}
-	s.setBroadcasts([]youtube.Broadcast{{ID: "a", Title: "Service", ScheduledStart: start}}, start.Add(-time.Hour))
-	if id, ok := s.idForLabel(s.labels[0]); !ok || id != "a" {
+	d := deviceState{broadcasts: []youtube.Broadcast{{ID: "a", Title: "Service", ScheduledStart: start}}}
+	d.refresh()
+	if id, ok := d.idForLabel(d.labels[0]); !ok || id != "a" {
 		t.Fatalf("idForLabel = %q, %v", id, ok)
 	}
-	if _, ok := s.idForLabel("nonsense"); ok {
+	if _, ok := d.idForLabel("nonsense"); ok {
 		t.Fatal("unknown label accepted")
 	}
 }
@@ -196,23 +282,56 @@ func TestBroadcastAttributes(t *testing.T) {
 
 func TestBroadcastOrderLiveFirstThenSoonest(t *testing.T) {
 	now := time.Now()
-	later := youtube.Broadcast{ID: "later", Title: "B", ScheduledStart: now.Add(48 * time.Hour), LifeCycleStatus: youtube.LifeReady}
-	soon := youtube.Broadcast{ID: "soon", Title: "A", ScheduledStart: now.Add(2 * time.Hour), LifeCycleStatus: youtube.LifeReady}
-	live := youtube.Broadcast{ID: "live", Title: "C", ScheduledStart: now.Add(72 * time.Hour), LifeCycleStatus: youtube.LifeLive}
-	untimed := youtube.Broadcast{ID: "untimed", Title: "D", LifeCycleStatus: youtube.LifeReady}
+	later := youtube.Broadcast{ID: "later", Title: "B", BoundStreamID: "s1", ScheduledStart: now.Add(48 * time.Hour), LifeCycleStatus: youtube.LifeReady}
+	soon := youtube.Broadcast{ID: "soon", Title: "A", BoundStreamID: "s1", ScheduledStart: now.Add(2 * time.Hour), LifeCycleStatus: youtube.LifeReady}
+	live := youtube.Broadcast{ID: "live", Title: "C", BoundStreamID: "s1", ScheduledStart: now.Add(72 * time.Hour), LifeCycleStatus: youtube.LifeLive}
+	untimed := youtube.Broadcast{ID: "untimed", Title: "D", BoundStreamID: "s1", LifeCycleStatus: youtube.LifeReady}
 
 	s := session{}
-	s.setBroadcasts([]youtube.Broadcast{later, soon}, now)
+	s.setAll([]youtube.Stream{mainKey()}, []youtube.Broadcast{later, soon}, now)
 	s.apply(untimed)
 	s.apply(live)
-	got := []string{s.broadcasts[0].ID, s.broadcasts[1].ID, s.broadcasts[2].ID, s.broadcasts[3].ID}
+	d := s.device(mqtt.DeviceID("s1"))
+	got := []string{d.broadcasts[0].ID, d.broadcasts[1].ID, d.broadcasts[2].ID, d.broadcasts[3].ID}
 	want := []string{"live", "soon", "later", "untimed"}
 	for i := range want {
 		if got[i] != want[i] {
 			t.Fatalf("order = %v, want %v", got, want)
 		}
 	}
-	if s.selectOptions()[0] != s.labels[0] {
+	if d.selectOptions()[0] != d.labels[0] {
 		t.Fatal("first option must be the first broadcast")
+	}
+}
+
+func TestHealthTextIsKeyScoped(t *testing.T) {
+	cases := map[string]youtube.StreamStatus{
+		"unknown":  {},
+		"inactive": {Status: "inactive"},
+		"ready":    {Status: "ready"},
+		"good":     {Status: youtube.StreamActive, Health: "good"},
+		"noData":   {Status: youtube.StreamActive, Health: "noData"},
+	}
+	for want, status := range cases {
+		if got := healthText(status); got != want {
+			t.Fatalf("healthText(%+v) = %q, want %q", status, got, want)
+		}
+	}
+	if healthText(youtube.StreamStatus{Status: youtube.StreamActive}) != "unknown" {
+		t.Fatal("active without a health report is unknown")
+	}
+}
+
+func TestAnyLiveSelected(t *testing.T) {
+	now := time.Now()
+	liveB := youtube.Broadcast{ID: "b1", Title: "Service", BoundStreamID: "s1", LifeCycleStatus: youtube.LifeLive}
+	s := session{}
+	s.setAll([]youtube.Stream{mainKey()}, []youtube.Broadcast{liveB}, now)
+	if s.anyLiveSelected() {
+		t.Fatal("a live broadcast nobody selected must not count")
+	}
+	s.device(mqtt.DeviceID("s1")).selectedID = "b1"
+	if !s.anyLiveSelected() {
+		t.Fatal("a selected live broadcast must count")
 	}
 }

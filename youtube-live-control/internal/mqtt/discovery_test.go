@@ -1,6 +1,7 @@
 package mqtt
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -8,8 +9,11 @@ import (
 var testOrigin = Origin{Version: "test", SupportURL: "https://example.invalid"}
 
 var testOptions = Options{
-	Broadcasts: []string{"Sun 5 Jan 09:30 · Service"},
-	Presets:    []string{"Sunday"},
+	Streams: []StreamDevice{
+		{DeviceID: "s1", Name: "Main Auditorium", Broadcasts: []string{"Sun 5 Jan 09:30 · Service"}},
+		{DeviceID: "s2", Name: "Youth Hall", Broadcasts: nil},
+	},
+	Presets: []string{"Sunday"},
 }
 
 func messagesByObject(t *testing.T) map[string]Message {
@@ -21,21 +25,38 @@ func messagesByObject(t *testing.T) map[string]Message {
 	return out
 }
 
-func TestMessagesCoverEveryEntityOnBothDevices(t *testing.T) {
+var streamObjects = []string{
+	"broadcast", "title", "privacy", "thumbnail", "stage", "scheduled_start", "live", "encoder",
+	"go_live", "end_stream", "delete", "broadcast_status", "stream_health", "stream_key",
+}
+
+func TestMessagesCoverEveryEntityOnEveryDevice(t *testing.T) {
 	byID := messagesByObject(t)
-	controller := []string{
-		"broadcast", "title", "privacy", "thumbnail", "stage", "scheduled_start", "live", "encoder",
-		"go_live", "end_stream", "delete", "fast_mode", "fast_mode_remaining",
-		"broadcast_status", "stream_health", "channel", "authorization",
-	}
+	hub := []string{"authorization", "channel", "fast_mode", "fast_mode_remaining"}
 	scheduling := []string{"preset", "start", "privacy", "schedule"}
-	for _, object := range controller {
-		m, ok := byID[NodeID+"_"+object]
+	for _, object := range hub {
+		m, ok := byID[HubNodeID+"_"+object]
 		if !ok {
-			t.Fatalf("missing discovery config for %s", object)
+			t.Fatalf("missing discovery config for hub %s", object)
 		}
-		if m.Payload["device"].(map[string]any)["identifiers"].([]string)[0] != Identifier {
+		if m.Payload["device"].(map[string]any)["identifiers"].([]string)[0] != HubIdentifier {
 			t.Fatalf("%s: wrong device", object)
+		}
+	}
+	for _, s := range testOptions.Streams {
+		node := StreamNodePrefix + s.DeviceID
+		for _, object := range streamObjects {
+			m, ok := byID[node+"_"+object]
+			if !ok {
+				t.Fatalf("missing discovery config for %s %s", s.DeviceID, object)
+			}
+			device := m.Payload["device"].(map[string]any)
+			if device["identifiers"].([]string)[0] != StreamIdentifierPrefix+s.DeviceID {
+				t.Fatalf("%s %s: wrong device", s.DeviceID, object)
+			}
+			if device["via_device"] != HubIdentifier || device["name"] != s.Name {
+				t.Fatalf("%s %s: device = %v", s.DeviceID, object, device)
+			}
 		}
 	}
 	for _, object := range scheduling {
@@ -44,12 +65,13 @@ func TestMessagesCoverEveryEntityOnBothDevices(t *testing.T) {
 			t.Fatalf("missing discovery config for %s", object)
 		}
 		device := m.Payload["device"].(map[string]any)
-		if device["identifiers"].([]string)[0] != SchedulingIdentifier || device["via_device"] != Identifier {
+		if device["identifiers"].([]string)[0] != SchedulingIdentifier || device["via_device"] != HubIdentifier {
 			t.Fatalf("%s: wrong device %v", object, device)
 		}
 	}
-	if len(byID) != len(controller)+len(scheduling) {
-		t.Fatalf("entity count %d, want %d", len(byID), len(controller)+len(scheduling))
+	want := len(hub) + len(streamObjects)*len(testOptions.Streams) + len(scheduling)
+	if len(byID) != want {
+		t.Fatalf("entity count %d, want %d", len(byID), want)
 	}
 }
 
@@ -75,10 +97,11 @@ func TestCommandEntitiesAreNeverOptimisticOrRetained(t *testing.T) {
 
 func TestButtonsGateOnOwnAvailabilityTopic(t *testing.T) {
 	byID := messagesByObject(t)
+	s1 := StreamTopics{Device: "s1"}
 	wantTopic := map[string]string{
-		NodeID + "_go_live":            GoLiveAvailability,
-		NodeID + "_end_stream":         EndAvailability,
-		NodeID + "_delete":             DeleteAvailability,
+		s1.Node() + "_go_live":         s1.GoLiveAvailability(),
+		s1.Node() + "_end_stream":      s1.EndAvailability(),
+		s1.Node() + "_delete":          s1.DeleteAvailability(),
 		SchedulingNodeID + "_schedule": ScheduleAvailability,
 	}
 	for id, topic := range wantTopic {
@@ -86,13 +109,7 @@ func TestButtonsGateOnOwnAvailabilityTopic(t *testing.T) {
 		if m.Payload["availability_mode"] != "all" {
 			t.Fatalf("%s: availability_mode = %v", id, m.Payload["availability_mode"])
 		}
-		found := false
-		for _, a := range m.Payload["availability"].([]map[string]any) {
-			if a["topic"] == topic {
-				found = true
-			}
-		}
-		if !found {
+		if !hasAvailabilityTopic(m, topic) {
 			t.Fatalf("%s: availability misses %s", id, topic)
 		}
 		if !strings.HasSuffix(m.Payload["command_topic"].(string), "/press") {
@@ -101,46 +118,75 @@ func TestButtonsGateOnOwnAvailabilityTopic(t *testing.T) {
 	}
 }
 
-func TestCommandEntitiesCarryTheLock(t *testing.T) {
-	for id, m := range messagesByObject(t) {
-		if _, hasCommand := m.Payload["command_topic"]; !hasCommand {
-			continue
+func hasAvailabilityTopic(m Message, topic string) bool {
+	avail, ok := m.Payload["availability"].([]map[string]any)
+	if !ok {
+		return false
+	}
+	for _, a := range avail {
+		if a["topic"] == topic {
+			return true
 		}
-		found := false
-		for _, a := range m.Payload["availability"].([]map[string]any) {
-			if a["topic"] == Lock {
-				found = true
+	}
+	return false
+}
+
+// Each stream device's writable entities carry that device's lock, scheduling carries
+// its own, and no lock crosses devices: that is what keeps bystander devices usable
+// while another device's change is in flight.
+func TestCommandEntitiesCarryTheirOwnDeviceLock(t *testing.T) {
+	byID := messagesByObject(t)
+	for _, s := range testOptions.Streams {
+		st := StreamTopics{Device: s.DeviceID}
+		for _, object := range []string{"broadcast", "title", "privacy", "go_live", "end_stream", "delete"} {
+			m := byID[st.Node()+"_"+object]
+			if !hasAvailabilityTopic(m, st.Lock()) {
+				t.Fatalf("%s %s lacks its device lock", s.DeviceID, object)
+			}
+			other := StreamTopics{Device: "s1"}
+			if s.DeviceID == "s1" {
+				other = StreamTopics{Device: "s2"}
+			}
+			if hasAvailabilityTopic(m, other.Lock()) || hasAvailabilityTopic(m, SchedulingLock) {
+				t.Fatalf("%s %s carries a foreign lock", s.DeviceID, object)
 			}
 		}
-		if !found {
-			t.Fatalf("%s lacks the lock availability", id)
+	}
+	for _, object := range []string{"preset", "start", "privacy", "schedule"} {
+		if !hasAvailabilityTopic(byID[SchedulingNodeID+"_"+object], SchedulingLock) {
+			t.Fatalf("scheduling %s lacks the scheduling lock", object)
 		}
+	}
+	if hasAvailabilityTopic(byID[HubNodeID+"_fast_mode"], SchedulingLock) {
+		t.Fatal("fast mode must not carry any lock")
 	}
 }
 
 func TestPlatformNativeClasses(t *testing.T) {
 	byID := messagesByObject(t)
-	stage := byID[NodeID+"_stage"]
+	node := StreamNodePrefix + "s1"
+	stage := byID[node+"_stage"]
 	if stage.Payload["device_class"] != "enum" || len(stage.Payload["options"].([]string)) != 10 {
 		t.Fatalf("stage = %v", stage.Payload)
 	}
-	if byID[NodeID+"_scheduled_start"].Payload["device_class"] != "timestamp" {
+	if byID[node+"_scheduled_start"].Payload["device_class"] != "timestamp" {
 		t.Fatal("scheduled_start is not a timestamp sensor")
 	}
-	if byID[NodeID+"_live"].Payload["device_class"] != "running" || byID[NodeID+"_encoder"].Payload["device_class"] != "connectivity" {
+	if byID[node+"_live"].Payload["device_class"] != "running" || byID[node+"_encoder"].Payload["device_class"] != "connectivity" {
 		t.Fatal("binary sensor device classes")
 	}
-	if byID[NodeID+"_broadcast"].Payload["json_attributes_topic"] != BroadcastAttributes {
+	s1 := StreamTopics{Device: "s1"}
+	if byID[node+"_broadcast"].Payload["json_attributes_topic"] != s1.BroadcastAttributes() {
 		t.Fatal("broadcast select lacks attributes topic")
 	}
 	if byID[SchedulingNodeID+"_start"].Topic != HADiscoveryTopic("datetime", SchedulingNodeID, "start") {
 		t.Fatal("start is not a core datetime entity")
 	}
-	if byID[NodeID+"_thumbnail"].Payload["url_topic"] != ThumbnailURLState || byID[NodeID+"_thumbnail"].Topic != HADiscoveryTopic("image", NodeID, "thumbnail") {
+	if byID[node+"_thumbnail"].Payload["url_topic"] != s1.ThumbnailURLState() || byID[node+"_thumbnail"].Topic != HADiscoveryTopic("image", node, "thumbnail") {
 		t.Fatal("thumbnail is not a core image entity")
 	}
-	for _, diag := range []string{"broadcast_status", "stream_health", "channel", "authorization"} {
-		if byID[NodeID+"_"+diag].Payload["entity_category"] != "diagnostic" {
+	for _, diag := range []string{node + "_broadcast_status", node + "_stream_health", node + "_stream_key", HubNodeID + "_channel", HubNodeID + "_authorization"} {
+		if byID[diag].Payload["entity_category"] != "diagnostic" {
 			t.Fatalf("%s should be diagnostic", diag)
 		}
 	}
@@ -148,22 +194,36 @@ func TestPlatformNativeClasses(t *testing.T) {
 
 func TestSelectsEmbedOptions(t *testing.T) {
 	byID := messagesByObject(t)
-	for id, want := range map[string]string{
-		NodeID + "_broadcast":        "Sun 5 Jan 09:30 · Service",
-		SchedulingNodeID + "_preset": "Sunday",
-	} {
-		if opts := byID[id].Payload["options"].([]string); len(opts) != 1 || opts[0] != want {
-			t.Fatalf("%s options = %v", id, opts)
-		}
+	if opts := byID[StreamNodePrefix+"s1_broadcast"].Payload["options"].([]string); len(opts) != 1 || opts[0] != "Sun 5 Jan 09:30 · Service" {
+		t.Fatalf("s1 broadcast options = %v", opts)
 	}
-	if opts := byID[NodeID+"_privacy"].Payload["options"].([]string); len(opts) != 3 || opts[0] != "public" {
+	if opts := byID[StreamNodePrefix+"s2_broadcast"].Payload["options"].([]string); len(opts) != 0 {
+		t.Fatalf("s2 broadcast options = %v", opts)
+	}
+	if opts := byID[SchedulingNodeID+"_preset"].Payload["options"].([]string); len(opts) != 1 || opts[0] != "Sunday" {
+		t.Fatalf("preset options = %v", opts)
+	}
+	if opts := byID[StreamNodePrefix+"s1_privacy"].Payload["options"].([]string); len(opts) != 3 || opts[0] != "public" {
 		t.Fatalf("privacy options = %v", opts)
 	}
 }
 
-func TestRetiredConfigTopicsAreNotPublished(t *testing.T) {
+func TestStreamConfigTopicsMatchMessages(t *testing.T) {
+	var published []string
+	for _, m := range streamMessages(testOptions.Streams[0], testOrigin) {
+		published = append(published, m.Topic)
+	}
+	listed := StreamConfigTopics("s1")
+	slices.Sort(published)
+	slices.Sort(listed)
+	if !slices.Equal(published, listed) {
+		t.Fatalf("StreamConfigTopics out of sync with streamMessages:\npublished %v\nlisted %v", published, listed)
+	}
+}
+
+func TestRetiredTopicsAreNotPublished(t *testing.T) {
 	live := map[string]bool{}
-	for _, m := range Messages(testOrigin, Options{}) {
+	for _, m := range Messages(testOrigin, testOptions) {
 		live[m.Topic] = true
 	}
 	for _, topic := range RetiredConfigTopics {
@@ -174,10 +234,27 @@ func TestRetiredConfigTopicsAreNotPublished(t *testing.T) {
 			t.Fatalf("retired topic %q is still published", topic)
 		}
 	}
+	for _, topic := range RetiredStateTopics {
+		if !strings.HasPrefix(topic, Prefix+"/") {
+			t.Fatalf("retired state topic %q", topic)
+		}
+		if strings.HasPrefix(topic, streamTopicPrefix) {
+			t.Fatalf("retired state topic %q collides with the stream namespace", topic)
+		}
+	}
+}
+
+func TestDeviceID(t *testing.T) {
+	if got := DeviceID("abcd-1234_XY"); got != "abcd-1234_XY" {
+		t.Fatalf("DeviceID = %q", got)
+	}
+	if got := DeviceID("a.b/c+d#e"); got != "a_b_c_d_e" {
+		t.Fatalf("DeviceID = %q", got)
+	}
 }
 
 func TestDiscoveryTopicLayout(t *testing.T) {
-	if got := HADiscoveryTopic("select", NodeID, "broadcast"); got != "homeassistant/select/youtube_live_control/broadcast/config" {
+	if got := HADiscoveryTopic("select", StreamNodePrefix+"s1", "broadcast"); got != "homeassistant/select/ylc_stream_s1/broadcast/config" {
 		t.Fatalf("HADiscoveryTopic = %q", got)
 	}
 }

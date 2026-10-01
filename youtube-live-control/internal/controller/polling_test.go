@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/jacobgad/youtube-live-control/internal/config"
+	"github.com/jacobgad/youtube-live-control/internal/mqtt"
 	"github.com/jacobgad/youtube-live-control/internal/youtube"
 )
 
@@ -37,21 +38,35 @@ func TestFastWindow(t *testing.T) {
 	}
 }
 
-func TestStatusDelayTiers(t *testing.T) {
+func TestPollDelayTiers(t *testing.T) {
 	c := &Controller{now: time.Now, opts: testOptions}
 
-	if got := c.statusDelay(); got != testOptions.IdleRefresh {
+	if got := c.pollDelay(); got != testOptions.IdleRefresh {
 		t.Fatalf("idle tier = %v", got)
 	}
 
-	c.session.setBroadcasts([]youtube.Broadcast{{ID: "b1", Title: "Service", LifeCycleStatus: youtube.LifeLive}}, time.Now())
-	c.session.selectedID = "b1"
-	if got := c.statusDelay(); got != testOptions.LiveRefresh {
+	now := time.Now()
+	liveB := youtube.Broadcast{ID: "b1", Title: "Service", BoundStreamID: "s1", LifeCycleStatus: youtube.LifeLive}
+	c.session.setAll([]youtube.Stream{{ID: "s1", Title: "Main"}}, []youtube.Broadcast{liveB}, now)
+	if got := c.pollDelay(); got != testOptions.IdleRefresh {
+		t.Fatalf("an unselected live broadcast stays on the idle tier, got %v", got)
+	}
+	c.session.device(mqtt.DeviceID("s1")).selectedID = "b1"
+	if got := c.pollDelay(); got != testOptions.LiveRefresh {
 		t.Fatalf("live tier = %v", got)
 	}
 
 	c.session.armFast(time.Now(), testOptions.FastRefreshDuration)
-	if got := c.statusDelay(); got != testOptions.FastRefresh {
+	if got := c.pollDelay(); got != testOptions.FastRefresh {
 		t.Fatalf("fast tier = %v", got)
+	}
+}
+
+func TestDifference(t *testing.T) {
+	if got := difference([]string{"a", "b", "c"}, []string{"b"}); len(got) != 2 || got[0] != "a" || got[1] != "c" {
+		t.Fatalf("difference = %v", got)
+	}
+	if got := difference(nil, []string{"a"}); got != nil {
+		t.Fatalf("difference = %v", got)
 	}
 }

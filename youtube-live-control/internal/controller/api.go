@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -19,7 +20,9 @@ import (
 type Listing struct {
 	Broadcasts []youtube.Broadcast
 	Stale      []youtube.Broadcast
-	SelectedID string
+	// SelectedOn maps a broadcast ID to the stream key name whose Home Assistant
+	// device has it selected.
+	SelectedOn map[string]string
 	Channel    string
 	Authorized bool
 }
@@ -28,10 +31,16 @@ type Listing struct {
 func (c *Controller) Listing() Listing {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	selected := map[string]string{}
+	for _, d := range c.session.devices {
+		if d.selectedID != "" {
+			selected[d.selectedID] = d.stream.Title
+		}
+	}
 	return Listing{
-		Broadcasts: append([]youtube.Broadcast(nil), c.session.broadcasts...),
+		Broadcasts: c.session.allBroadcasts(),
 		Stale:      append([]youtube.Broadcast(nil), c.session.stale...),
-		SelectedID: c.session.selectedID,
+		SelectedOn: selected,
 		Channel:    c.session.channel,
 		Authorized: c.session.authorized,
 	}
@@ -42,24 +51,33 @@ func (c *Controller) Broadcast(ctx context.Context, id string) (youtube.Broadcas
 	if b, ok := c.cached(id); ok {
 		return b, true
 	}
-	c.refreshList(ctx)
+	c.poll(ctx)
 	return c.cached(id)
 }
 
 func (c *Controller) cached(id string) (youtube.Broadcast, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for _, b := range c.session.broadcasts {
-		if b.ID == id {
-			return b, true
-		}
+	return c.session.find(id)
+}
+
+// scopesFor locks the device showing the broadcast, plus the device it is being
+// rebound onto; an operation touching no device still takes the shared web scope
+// so a double submit cannot run twice.
+func (c *Controller) scopesFor(broadcastID, targetStreamID string) []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	var scopes []string
+	if d := c.session.deviceFor(broadcastID); d != nil {
+		scopes = append(scopes, d.deviceID)
 	}
-	for _, b := range c.session.stale {
-		if b.ID == id {
-			return b, true
-		}
+	if d := c.session.deviceByStream(targetStreamID); d != nil && !slices.Contains(scopes, d.deviceID) {
+		scopes = append(scopes, d.deviceID)
 	}
-	return youtube.Broadcast{}, false
+	if len(scopes) == 0 {
+		scopes = []string{scopeWeb}
+	}
+	return scopes
 }
 
 // Streams lists the channel's stream keys. Costs 1 quota unit.
@@ -111,7 +129,7 @@ func (c *Controller) Update(ctx context.Context, id string, edit Edit) (youtube.
 		return youtube.Broadcast{}, err
 	}
 	var result youtube.Broadcast
-	err := c.run(ctx, "web_update", func(ctx context.Context) error {
+	err := c.run(ctx, "web_update", c.scopesFor(id, edit.StreamID), func(ctx context.Context) error {
 		b, err := c.updateBroadcast(ctx, id, func(b *youtube.Broadcast) {
 			b.Title = strings.TrimSpace(edit.Title)
 			b.Description = edit.Description
@@ -150,13 +168,14 @@ type NewBroadcast struct {
 	ThumbnailType string
 }
 
-// Create schedules a broadcast; like Schedule it never changes the selection.
+// Create schedules a broadcast; like Schedule it never changes any selection and
+// locks no device — the new broadcast appears in its key's select on readback.
 func (c *Controller) Create(ctx context.Context, req NewBroadcast) (youtube.Broadcast, error) {
 	if err := req.Validate(); err != nil {
 		return youtube.Broadcast{}, err
 	}
 	var result youtube.Broadcast
-	err := c.run(ctx, "web_create", func(ctx context.Context) error {
+	err := c.run(ctx, "web_create", []string{scopeWeb}, func(ctx context.Context) error {
 		b, err := c.createBroadcast(ctx, req)
 		result = b
 		return err
@@ -200,10 +219,7 @@ func (c *Controller) createBroadcast(ctx context.Context, req NewBroadcast) (you
 	if err != nil || !ok {
 		return youtube.Broadcast{}, fmt.Errorf("read back after create: %w", err)
 	}
-	c.mu.Lock()
-	c.session.apply(readback)
-	c.mu.Unlock()
-	c.pub.update(ctx, c.snapshot)
+	c.applyAndPublish(ctx, readback)
 	return readback, nil
 }
 
@@ -212,12 +228,12 @@ func (c *Controller) Delete(ctx context.Context, id string) error {
 	if b, ok := c.cached(id); ok && isLive(b) {
 		return errors.New("the broadcast is live; end the stream before deleting it")
 	}
-	return c.run(ctx, "web_delete", func(ctx context.Context) error { return c.deleteBroadcast(ctx, id) })
+	return c.run(ctx, "web_delete", c.scopesFor(id, ""), func(ctx context.Context) error { return c.deleteBroadcast(ctx, id) })
 }
 
 // SetThumbnail uploads a thumbnail for a broadcast.
 func (c *Controller) SetThumbnail(ctx context.Context, id, contentType string, image []byte) error {
-	return c.run(ctx, "web_thumbnail", func(ctx context.Context) error {
+	return c.run(ctx, "web_thumbnail", c.scopesFor(id, ""), func(ctx context.Context) error {
 		if err := c.yt.SetThumbnail(ctx, id, contentType, image); err != nil {
 			c.log.Error("operation_failed", "operation", "thumbnail_upload", "id", id, "error", err)
 			return err

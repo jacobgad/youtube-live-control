@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"time"
 
 	"github.com/jacobgad/youtube-live-control/internal/youtube"
@@ -16,14 +15,12 @@ const (
 	transitionInterval = 3 * time.Second
 )
 
-// ErrNoSelection is returned while nothing is selected.
+// ErrNoSelection is returned while nothing is selected on the device.
 var ErrNoSelection = errors.New("no broadcast selected")
 
 // snapTopic is re-sent on failure so the Home Assistant field reverts.
-func (c *Controller) editSelected(ctx context.Context, snapTopic string, mutate func(*youtube.Broadcast)) error {
-	c.mu.Lock()
-	id := c.session.selectedID
-	c.mu.Unlock()
+func (c *Controller) editSelected(ctx context.Context, deviceID, snapTopic string, mutate func(*youtube.Broadcast)) error {
+	id := c.selectedOn(deviceID)
 	if id == "" {
 		c.snapBack(snapTopic)
 		return ErrNoSelection
@@ -33,6 +30,15 @@ func (c *Controller) editSelected(ctx context.Context, snapTopic string, mutate 
 		return err
 	}
 	return nil
+}
+
+func (c *Controller) selectedOn(deviceID string) string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if d := c.session.device(deviceID); d != nil {
+		return d.selectedID
+	}
+	return ""
 }
 
 func (c *Controller) updateBroadcast(ctx context.Context, id string, mutate func(*youtube.Broadcast)) (youtube.Broadcast, error) {
@@ -68,8 +74,8 @@ func (c *Controller) applyAndPublish(ctx context.Context, b youtube.Broadcast) {
 	c.pub.update(ctx, c.snapshot)
 }
 
-func (c *Controller) goLive(ctx context.Context) error {
-	id, b, stream, ok := c.verifySelected(ctx, "go_live")
+func (c *Controller) goLive(ctx context.Context, deviceID string) error {
+	id, b, stream, ok := c.verifySelected(ctx, deviceID, "go_live")
 	if !ok {
 		return ErrNoSelection
 	}
@@ -78,8 +84,8 @@ func (c *Controller) goLive(ctx context.Context) error {
 		c.pub.update(ctx, c.snapshot)
 		return errors.New("stream is not active")
 	}
-	c.setPending(ctx, pendingGoLive)
-	defer c.clearPending(ctx)
+	c.setPending(ctx, deviceID, pendingGoLive)
+	defer c.clearPending(ctx, deviceID)
 
 	err := c.yt.Transition(ctx, id, youtube.TransitionLive)
 	if err != nil && youtube.HasReason(err, "invalidTransition") && b.MonitorEnabled {
@@ -105,8 +111,8 @@ func (c *Controller) goLive(ctx context.Context) error {
 	return nil
 }
 
-func (c *Controller) endStream(ctx context.Context) error {
-	id, b, stream, ok := c.verifySelected(ctx, "end_stream")
+func (c *Controller) endStream(ctx context.Context, deviceID string) error {
+	id, b, stream, ok := c.verifySelected(ctx, deviceID, "end_stream")
 	if !ok {
 		return ErrNoSelection
 	}
@@ -120,8 +126,8 @@ func (c *Controller) endStream(ctx context.Context) error {
 		c.pub.update(ctx, c.snapshot)
 		return errors.New("stream is still active; stop the encoder first")
 	}
-	c.setPending(ctx, pendingEnd)
-	defer c.clearPending(ctx)
+	c.setPending(ctx, deviceID, pendingEnd)
+	defer c.clearPending(ctx, deviceID)
 
 	if err := c.yt.Transition(ctx, id, youtube.TransitionComplete); err != nil {
 		c.log.Error("operation_failed", "operation", "transition_complete", "id", id, "error", err)
@@ -137,8 +143,8 @@ func (c *Controller) endStream(ctx context.Context) error {
 	return nil
 }
 
-func (c *Controller) deleteSelected(ctx context.Context) error {
-	id, b, _, ok := c.verifySelected(ctx, "delete")
+func (c *Controller) deleteSelected(ctx context.Context, deviceID string) error {
+	id, b, _, ok := c.verifySelected(ctx, deviceID, "delete")
 	if !ok {
 		return ErrNoSelection
 	}
@@ -162,12 +168,15 @@ func (c *Controller) deleteBroadcast(ctx context.Context, id string) error {
 }
 
 // Commands decide on a fresh read, never on the last poll.
-func (c *Controller) verifySelected(ctx context.Context, op string) (string, youtube.Broadcast, youtube.StreamStatus, bool) {
+func (c *Controller) verifySelected(ctx context.Context, deviceID, op string) (string, youtube.Broadcast, youtube.StreamStatus, bool) {
 	c.mu.Lock()
-	id := c.session.selectedID
+	var id, expectedStream string
+	if d := c.session.device(deviceID); d != nil {
+		id, expectedStream = d.selectedID, d.stream.ID
+	}
 	c.mu.Unlock()
 	if id == "" {
-		c.log.Warn("command_refused", "command", op, "reason", "no_broadcast_selected")
+		c.log.Warn("command_refused", "command", op, "deviceId", deviceID, "reason", "no_broadcast_selected")
 		return "", youtube.Broadcast{}, youtube.StreamStatus{}, false
 	}
 	b, ok, err := c.yt.GetBroadcast(ctx, id)
@@ -180,6 +189,13 @@ func (c *Controller) verifySelected(ctx context.Context, op string) (string, you
 		c.dropMissing(ctx, id)
 		return "", youtube.Broadcast{}, youtube.StreamStatus{}, false
 	}
+	// A rebind discovered here moves the broadcast to its new device; acting on it
+	// from this device would bypass the gaining device's lock.
+	if b.BoundStreamID != expectedStream {
+		c.log.Warn("command_refused", "command", op, "id", id, "deviceId", deviceID, "reason", "broadcast_rebound")
+		c.applyAndPublish(ctx, b)
+		return "", youtube.Broadcast{}, youtube.StreamStatus{}, false
+	}
 	var stream youtube.StreamStatus
 	if b.BoundStreamID != "" {
 		stream, err = c.yt.StreamStatus(ctx, b.BoundStreamID)
@@ -190,8 +206,8 @@ func (c *Controller) verifySelected(ctx context.Context, op string) (string, you
 	}
 	c.mu.Lock()
 	c.session.apply(b)
-	if c.session.selectedID == id {
-		c.session.stream = stream
+	if d := c.session.deviceByStream(b.BoundStreamID); d != nil {
+		d.stream.Status = stream
 	}
 	c.mu.Unlock()
 	return id, b, stream, true
@@ -222,28 +238,31 @@ func (c *Controller) waitForLifecycle(ctx context.Context, id, want string) bool
 	}
 }
 
-func (c *Controller) setPending(ctx context.Context, p pendingOp) {
+func (c *Controller) setPending(ctx context.Context, deviceID string, p pendingOp) {
 	c.mu.Lock()
-	c.session.pending = p
+	if d := c.session.device(deviceID); d != nil {
+		d.pending = p
+	}
 	c.mu.Unlock()
 	c.pub.update(ctx, c.snapshot)
 }
 
-func (c *Controller) clearPending(ctx context.Context) {
+func (c *Controller) clearPending(ctx context.Context, deviceID string) {
 	c.mu.Lock()
-	c.session.pending = pendingNone
+	if d := c.session.device(deviceID); d != nil {
+		d.pending = pendingNone
+	}
 	// Re-armed so the post-transition stage lands without another tap.
 	c.session.armFast(c.now(), c.opts.FastRefreshDuration)
 	c.mu.Unlock()
 	c.pub.update(ctx, c.snapshot)
-	c.kickStatusPoll()
+	c.kickPoll()
 }
 
 func (c *Controller) dropMissing(ctx context.Context, id string) {
 	c.mu.Lock()
-	remaining := slices.DeleteFunc(slices.Concat(c.session.broadcasts, c.session.stale), func(b youtube.Broadcast) bool { return b.ID == id })
-	c.session.setBroadcasts(remaining, c.now())
+	c.session.removeBroadcast(id)
 	c.mu.Unlock()
 	c.pub.update(ctx, c.snapshot)
-	c.kickStatusPoll()
+	c.kickPoll()
 }

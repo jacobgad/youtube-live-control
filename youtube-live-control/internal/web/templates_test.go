@@ -23,7 +23,7 @@ func TestEveryPageRenders(t *testing.T) {
 
 	cases := map[string]any{
 		"connection":     connectionData{Configured: true, RedirectURI: "http://localhost:8098/oauth/callback", AuthURL: "https://accounts.google.com/x"},
-		"broadcasts":     broadcastsData{Listing: controller.Listing{Broadcasts: []youtube.Broadcast{live}, Stale: []youtube.Broadcast{stale}, SelectedID: "b1", Channel: "Church", Authorized: true}, Presets: []preset.Preset{p}},
+		"broadcasts":     broadcastsData{Listing: controller.Listing{Broadcasts: []youtube.Broadcast{live}, Stale: []youtube.Broadcast{stale}, SelectedOn: map[string]string{"b1": "OBS"}, Channel: "Church", Authorized: true}, Presets: []preset.Preset{p}},
 		"broadcast_form": broadcastForm{ID: "b1", Title: "Sunday Service", Start: start, Privacy: "public", StreamID: "s1", ThumbnailURL: live.ThumbnailURL, Streams: streams, Lifecycle: "ready", Images: library},
 		"presets":        presetsData{Presets: []preset.Preset{p}, Streams: map[string]youtube.Stream{"s1": streams[0]}},
 		"preset_form":    presetFormData{Preset: p, Streams: streams, Images: library},

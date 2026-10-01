@@ -6,11 +6,12 @@ import (
 	"slices"
 	"time"
 
+	"github.com/jacobgad/youtube-live-control/internal/mqtt"
 	"github.com/jacobgad/youtube-live-control/internal/youtube"
 )
 
-// noBroadcastLabel is the Broadcast select's only option while nothing is scheduled;
-// MQTT selects need at least one option. "Nothing selected" is published as None,
+// noBroadcastLabel is a Broadcast select's only option while nothing is bound to its
+// key; MQTT selects need at least one option. "Nothing selected" is published as None,
 // since Home Assistant ignores a select state that is not one of the options.
 const noBroadcastLabel = "No broadcast selected"
 
@@ -39,17 +40,25 @@ const (
 	stageEnded             = "ended"
 )
 
-// session is guarded by Controller.mu; an empty selectedID means nothing selected and
-// a zero fastUntil means the fast-refresh window is off.
+// deviceState is one custom stream key's Home Assistant device: the key itself, the
+// broadcasts bound to it, and the volunteer's selection among them.
+type deviceState struct {
+	stream     youtube.Stream
+	deviceID   string
+	broadcasts []youtube.Broadcast
+	labels     []string
+	selectedID string
+	pending    pendingOp
+}
+
+// session is guarded by Controller.mu; an empty selectedID on a device means nothing
+// selected there and a zero fastUntil means the fast-refresh window is off.
 type session struct {
 	authorized bool
 	channel    string
-	broadcasts []youtube.Broadcast
+	devices    []*deviceState
+	unbound    []youtube.Broadcast
 	stale      []youtube.Broadcast
-	labels     []string
-	selectedID string
-	stream     youtube.StreamStatus
-	pending    pendingOp
 	fastUntil  time.Time
 	sched      scheduling
 }
@@ -70,24 +79,57 @@ func (s *session) fastRemainingMinutes(now time.Time) int {
 	return int((s.fastUntil.Sub(now) + time.Minute - 1) / time.Minute)
 }
 
-// Nothing but a human changes the selection: a vanished broadcast clears it, and
-// the sorted list puts the soonest stream first so choosing is one tap.
-func (s *session) setBroadcasts(list []youtube.Broadcast, now time.Time) (selectionLost bool) {
-	s.broadcasts, s.stale = nil, nil
-	for _, b := range list {
-		if isStale(b, now) {
+// setAll rebuilds the device roster from the custom stream keys and partitions the
+// broadcasts onto them by binding. Selections and pending operations carry over per
+// key; nothing but a human ever fills an empty selection, and a selected broadcast
+// that is no longer bound to its device clears (selection lost).
+func (s *session) setAll(streams []youtube.Stream, broadcasts []youtube.Broadcast, now time.Time) (lost []string) {
+	prev := make(map[string]*deviceState, len(s.devices))
+	for _, d := range s.devices {
+		prev[d.stream.ID] = d
+	}
+	s.devices = nil
+	for _, st := range streams {
+		if st.IsDefault {
+			continue
+		}
+		d := &deviceState{stream: st, deviceID: mqtt.DeviceID(st.ID)}
+		if p, ok := prev[st.ID]; ok {
+			d.selectedID, d.pending = p.selectedID, p.pending
+		}
+		s.devices = append(s.devices, d)
+	}
+	slices.SortStableFunc(s.devices, compareDevices)
+
+	byStream := make(map[string]*deviceState, len(s.devices))
+	for _, d := range s.devices {
+		byStream[d.stream.ID] = d
+	}
+	s.unbound, s.stale = nil, nil
+	for _, b := range broadcasts {
+		switch d := byStream[b.BoundStreamID]; {
+		case isStale(b, now):
 			s.stale = append(s.stale, b)
-		} else {
-			s.broadcasts = append(s.broadcasts, b)
+		case d != nil:
+			d.broadcasts = append(d.broadcasts, b)
+		default:
+			s.unbound = append(s.unbound, b)
 		}
 	}
-	s.labels = broadcastLabels(s.broadcasts)
-	if s.selectedID != "" && s.selected() == nil {
-		s.selectedID = ""
-		s.resetLiveState()
-		return true
+	slices.SortStableFunc(s.unbound, compareBroadcasts)
+	for _, d := range s.devices {
+		d.refresh()
+		if d.selectedID != "" && d.selected() == nil {
+			d.selectedID = ""
+			d.pending = pendingNone
+			lost = append(lost, d.deviceID)
+		}
 	}
-	return false
+	return lost
+}
+
+func compareDevices(a, b *deviceState) int {
+	return cmp.Or(cmp.Compare(a.stream.Title, b.stream.Title), cmp.Compare(a.stream.ID, b.stream.ID))
 }
 
 func isStale(b youtube.Broadcast, now time.Time) bool {
@@ -98,14 +140,141 @@ func isLive(b youtube.Broadcast) bool {
 	return b.LifeCycleStatus == youtube.LifeLive || b.LifeCycleStatus == youtube.LifeLiveStarting
 }
 
+// apply routes a freshly read broadcast to the device its binding names, moving it
+// between devices (or to unbound) when the binding changed. A selection follows the
+// broadcast only while it stays on the same device.
 func (s *session) apply(b youtube.Broadcast) {
-	if i := slices.IndexFunc(s.broadcasts, func(x youtube.Broadcast) bool { return x.ID == b.ID }); i >= 0 {
-		s.broadcasts[i] = b
-	} else {
-		s.broadcasts = append(s.broadcasts, b)
+	target := s.deviceByStream(b.BoundStreamID)
+	for _, d := range s.devices {
+		if d == target {
+			d.upsert(b)
+		} else {
+			d.remove(b.ID)
+		}
 	}
-	slices.SortStableFunc(s.broadcasts, compareBroadcasts)
-	s.labels = broadcastLabels(s.broadcasts)
+	s.unbound = slices.DeleteFunc(s.unbound, func(x youtube.Broadcast) bool { return x.ID == b.ID })
+	s.stale = slices.DeleteFunc(s.stale, func(x youtube.Broadcast) bool { return x.ID == b.ID })
+	if target == nil {
+		s.unbound = append(s.unbound, b)
+		slices.SortStableFunc(s.unbound, compareBroadcasts)
+	}
+}
+
+// removeBroadcast drops a vanished broadcast everywhere, clearing any selection of it.
+func (s *session) removeBroadcast(id string) {
+	for _, d := range s.devices {
+		d.remove(id)
+	}
+	s.unbound = slices.DeleteFunc(s.unbound, func(x youtube.Broadcast) bool { return x.ID == id })
+	s.stale = slices.DeleteFunc(s.stale, func(x youtube.Broadcast) bool { return x.ID == id })
+}
+
+func (s *session) device(deviceID string) *deviceState {
+	for _, d := range s.devices {
+		if d.deviceID == deviceID {
+			return d
+		}
+	}
+	return nil
+}
+
+func (s *session) deviceByStream(streamID string) *deviceState {
+	if streamID == "" {
+		return nil
+	}
+	for _, d := range s.devices {
+		if d.stream.ID == streamID {
+			return d
+		}
+	}
+	return nil
+}
+
+func (s *session) deviceFor(broadcastID string) *deviceState {
+	for _, d := range s.devices {
+		for i := range d.broadcasts {
+			if d.broadcasts[i].ID == broadcastID {
+				return d
+			}
+		}
+	}
+	return nil
+}
+
+func (s *session) find(id string) (youtube.Broadcast, bool) {
+	for _, list := range s.collections() {
+		for _, b := range list {
+			if b.ID == id {
+				return b, true
+			}
+		}
+	}
+	return youtube.Broadcast{}, false
+}
+
+func (s *session) collections() [][]youtube.Broadcast {
+	out := make([][]youtube.Broadcast, 0, len(s.devices)+2)
+	for _, d := range s.devices {
+		out = append(out, d.broadcasts)
+	}
+	return append(out, s.unbound, s.stale)
+}
+
+// allBroadcasts is the web UI's flat upcoming list: every non-stale broadcast on any
+// device plus the unbound ones, in one sorted sweep.
+func (s *session) allBroadcasts() []youtube.Broadcast {
+	var out []youtube.Broadcast
+	for _, d := range s.devices {
+		out = append(out, d.broadcasts...)
+	}
+	out = append(out, s.unbound...)
+	slices.SortStableFunc(out, compareBroadcasts)
+	return out
+}
+
+func (s *session) allStarts() []time.Time {
+	var starts []time.Time
+	for _, list := range s.collections() {
+		for _, b := range list {
+			starts = append(starts, b.ScheduledStart)
+		}
+	}
+	return starts
+}
+
+func (s *session) anyLiveSelected() bool {
+	for _, d := range s.devices {
+		if b := d.selected(); b != nil && isLive(*b) {
+			return true
+		}
+	}
+	return false
+}
+
+func (d *deviceState) refresh() {
+	slices.SortStableFunc(d.broadcasts, compareBroadcasts)
+	d.labels = broadcastLabels(d.broadcasts)
+}
+
+func (d *deviceState) upsert(b youtube.Broadcast) {
+	if i := slices.IndexFunc(d.broadcasts, func(x youtube.Broadcast) bool { return x.ID == b.ID }); i >= 0 {
+		d.broadcasts[i] = b
+	} else {
+		d.broadcasts = append(d.broadcasts, b)
+	}
+	d.refresh()
+}
+
+func (d *deviceState) remove(id string) {
+	n := len(d.broadcasts)
+	d.broadcasts = slices.DeleteFunc(d.broadcasts, func(x youtube.Broadcast) bool { return x.ID == id })
+	if len(d.broadcasts) != n {
+		d.refresh()
+	}
+	if d.selectedID == id {
+		d.selectedID = ""
+		d.pending = pendingNone
+	}
 }
 
 // Live first, then soonest, then title: the stream the volunteer wants is the first option.
@@ -125,58 +294,42 @@ func compareBroadcasts(a, b youtube.Broadcast) int {
 	return cmp.Or(a.ScheduledStart.Compare(b.ScheduledStart), cmp.Compare(a.Title, b.Title))
 }
 
-func (s *session) selected() *youtube.Broadcast {
-	if s.selectedID == "" {
+func (d *deviceState) selected() *youtube.Broadcast {
+	if d.selectedID == "" {
 		return nil
 	}
-	for i := range s.broadcasts {
-		if s.broadcasts[i].ID == s.selectedID {
-			b := s.broadcasts[i]
+	for i := range d.broadcasts {
+		if d.broadcasts[i].ID == d.selectedID {
+			b := d.broadcasts[i]
 			return &b
 		}
 	}
 	return nil
 }
 
-func (s *session) resetLiveState() {
-	s.stream = youtube.StreamStatus{}
-	s.pending = pendingNone
-}
-
-func (s *session) selectOptions() []string {
-	if len(s.labels) == 0 {
+func (d *deviceState) selectOptions() []string {
+	if len(d.labels) == 0 {
 		return []string{noBroadcastLabel}
 	}
-	return s.labels
+	return d.labels
 }
 
-func (s *session) selectedLabel() string {
-	for i := range s.broadcasts {
-		if s.broadcasts[i].ID == s.selectedID {
-			return s.labels[i]
+func (d *deviceState) selectedLabel() string {
+	for i := range d.broadcasts {
+		if d.broadcasts[i].ID == d.selectedID {
+			return d.labels[i]
 		}
 	}
 	return mqttNone
 }
 
-func (s *session) idForLabel(label string) (id string, ok bool) {
-	for i, l := range s.labels {
+func (d *deviceState) idForLabel(label string) (id string, ok bool) {
+	for i, l := range d.labels {
 		if l == label {
-			return s.broadcasts[i].ID, true
+			return d.broadcasts[i].ID, true
 		}
 	}
 	return "", false
-}
-
-func (s *session) allStarts() []time.Time {
-	starts := make([]time.Time, 0, len(s.broadcasts)+len(s.stale))
-	for _, b := range s.broadcasts {
-		starts = append(starts, b.ScheduledStart)
-	}
-	for _, b := range s.stale {
-		starts = append(starts, b.ScheduledStart)
-	}
-	return starts
 }
 
 func broadcastLabels(list []youtube.Broadcast) []string {
@@ -257,17 +410,13 @@ func isOnAir(current string) bool {
 	return current == stageLive || current == stageStreamStopping || current == stageReadyToEnd
 }
 
-func healthText(b *youtube.Broadcast, stream youtube.StreamStatus) string {
-	if b == nil {
-		return "none"
-	}
-	if b.BoundStreamID == "" {
-		return "no stream bound"
+// healthText is key-scoped: the encoder's ingestion state is a fact about the stream
+// key, meaningful whether or not a broadcast is selected.
+func healthText(stream youtube.StreamStatus) string {
+	if stream.Status == "" {
+		return "unknown"
 	}
 	if stream.Status != youtube.StreamActive {
-		if stream.Status == "" {
-			return "unknown"
-		}
 		return stream.Status
 	}
 	if stream.Health == "" {

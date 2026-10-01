@@ -101,40 +101,51 @@ func TestEnterStartRejectsInvalidPayload(t *testing.T) {
 	c.inflight.Wait()
 }
 
-func TestLockIsExclusive(t *testing.T) {
-	c := &Controller{now: time.Now, opts: testOptions, log: slog.Default(), pub: newPublisher(nullConn{}, mqtt.Origin{}, slog.Default())}
-	if !c.snapshot().unlocked {
+func TestLocksAreExclusivePerScope(t *testing.T) {
+	c := &Controller{now: time.Now, opts: testOptions, log: slog.Default(), locked: map[string]bool{}, pub: newPublisher(nullConn{}, mqtt.Origin{}, slog.Default())}
+	if !c.snapshot().schedUnlocked {
 		t.Fatal("inputs must start available")
 	}
-	if !c.lock() || c.lock() {
+	sched := []string{scopeScheduling}
+	if !c.lock(sched) || c.lock(sched) {
 		t.Fatal("the lock must be exclusive")
 	}
-	if c.snapshot().unlocked {
+	if c.snapshot().schedUnlocked {
 		t.Fatal("a held lock must publish the inputs unavailable")
 	}
-	c.unlock()
-	if !c.snapshot().unlocked || !c.lock() {
+	if !c.lock([]string{"dev1"}) {
+		t.Fatal("another device's scope must stay available")
+	}
+	if c.lock([]string{"dev2", "dev1"}) || !c.locked["dev1"] {
+		t.Fatal("multi-scope locking must be all-or-nothing")
+	}
+	if c.locked["dev2"] {
+		t.Fatal("a refused multi-scope lock must not leave partial locks behind")
+	}
+	c.unlock(sched)
+	if !c.snapshot().schedUnlocked || !c.lock(sched) {
 		t.Fatal("unlock must release")
 	}
 }
 
 func TestEnqueueDropsWhileLockedAndReleasesAfterFailure(t *testing.T) {
-	c := &Controller{now: time.Now, opts: testOptions, log: slog.Default(), pub: newPublisher(nullConn{}, mqtt.Origin{}, slog.Default()), ops: make(chan queuedOp, commandBuffer), opsDone: make(chan struct{})}
+	c := &Controller{now: time.Now, opts: testOptions, log: slog.Default(), locked: map[string]bool{}, pub: newPublisher(nullConn{}, mqtt.Origin{}, slog.Default()), ops: make(chan queuedOp, commandBuffer), opsDone: make(chan struct{})}
 	c.lifetime, c.endLife = context.WithCancel(context.Background())
 	go c.opsLoop()
 
 	started := make(chan struct{})
 	finish := make(chan struct{})
 	runs := 0
-	c.enqueue("first", func(context.Context) error { runs++; close(started); <-finish; return errors.New("boom") })
+	sched := []string{scopeScheduling}
+	c.enqueue("first", sched, func(context.Context) error { runs++; close(started); <-finish; return errors.New("boom") })
 	<-started
-	c.enqueue("second", func(context.Context) error { runs++; return nil })
-	if c.snapshot().unlocked {
+	c.enqueue("second", sched, func(context.Context) error { runs++; return nil })
+	if c.snapshot().schedUnlocked {
 		t.Fatal("inputs must be unavailable while the first command runs")
 	}
 	close(finish)
 	deadline := time.Now().Add(2 * time.Second)
-	for !c.snapshot().unlocked {
+	for !c.snapshot().schedUnlocked {
 		if time.Now().After(deadline) {
 			t.Fatal("lock not released after the failing command")
 		}

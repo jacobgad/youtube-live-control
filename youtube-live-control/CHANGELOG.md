@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.0.0
+
+**Breaking: one Home Assistant device per custom stream key.** Entity IDs and MQTT topics change; dashboards and automations referencing the old *YouTube Live* device need re-pointing.
+
+- Every custom (non-default) stream key on the channel is its own MQTT device, named after the key in Studio and discovered automatically — two services can run side by side on different keys. Identity is keyed on the immutable stream ID, so Studio renames just relabel the device.
+- Each key device carries the full operating panel (Broadcast select of that key's broadcasts, Title, Privacy, Thumbnail, Stage, Scheduled start, Live, Go Live/End Stream/Delete, Broadcast status) plus a **Stream key** diagnostic sensor for picking the matching encoder/OBS view.
+- **Encoder connected** and **Stream health** are now key-scoped: truthful the moment OBS starts pushing, selection or not.
+- New **YouTube Live Control** hub device carries Authorization, Channel and the global Fast refresh switch; key devices and Scheduling hang off it. The old *YouTube Live* device is retired automatically.
+- The in-flight lock is now per device: a change on one key's broadcast no longer greys out the other keys or Scheduling. Writes still run one at a time.
+- Polling unified into one cycle of three list calls — a flat 3 quota units per cycle regardless of how many keys exist.
+- Keys deleted in Studio retire their devices automatically, even when deleted while the add-on was off.
+- Web UI unchanged, except the *Selected in Home Assistant* badge now names the key's device.
+
 ## 1.9.2
 
 - End Stream now clears the panel immediately on completion, matching Schedule and Delete, instead of leaving the finished broadcast selected until the next list poll.

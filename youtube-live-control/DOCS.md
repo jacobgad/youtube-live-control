@@ -3,7 +3,7 @@
 Runs a channel's scheduled YouTube live streams from Home Assistant.
 
 - **Producers** schedule from a preset on the dashboard: preset → date → time → **Schedule**. Presets, descriptions, thumbnails and one-off edits live in the add-on's web UI.
-- **Volunteers** operate on the day: pick the stream (it is the first option), fix the title if needed, **Go Live** once OBS is sending, **End Stream** after the service. One **Stage** sensor says what to do next.
+- **Volunteers** operate on the day: every custom stream key is its own device, so each encoder has its own panel. Pick the stream (it is the first option), fix the title if needed, **Go Live** once OBS is sending, **End Stream** after the service. One **Stage** sensor per device says what to do next — and two services can run side by side on different keys.
 
 ## Requirements
 
@@ -52,11 +52,13 @@ Web UI → **Presets → Create**. A preset is everything a regular service need
 
 ### Schedule (dashboard, *YouTube Live Scheduling* device)
 
-Pick a **Preset** — **Start** jumps to its next free usual slot and **Privacy** to the preset's — adjust either if this stream differs, press **Schedule**. The broadcast is created with the preset's title, description, category, stream key and thumbnail and appears in the **Broadcast** select; the fields clear to confirm. Schedule is greyed while no preset is chosen, the preset has no stream key, or the slot is in the past. It never changes which broadcast Home Assistant is on.
+Pick a **Preset** — **Start** jumps to its next free usual slot and **Privacy** to the preset's — adjust either if this stream differs, press **Schedule**. The broadcast is created with the preset's title, description, category, stream key and thumbnail and appears in the **Broadcast** select of its stream key's device; the fields clear to confirm. Schedule is greyed while no preset is chosen, the preset has no stream key, or the slot is in the past. It never changes which broadcast any device is on.
 
-### Operate (dashboard, *YouTube Live* device)
+### Operate (dashboard, one device per stream key)
 
-1. Pick the stream in **Broadcast** (sorted live-first, then soonest — the right one is first). Nothing is ever selected for you.
+Each custom stream key on the channel is its own Home Assistant device, named after the key in Studio. A broadcast appears on the device of the key it is bound to; a broadcast with no custom key appears only in the web UI. Keys added or removed in Studio add or remove devices automatically.
+
+1. On that key's device, pick the stream in **Broadcast** (sorted live-first, then soonest — the right one is first). Nothing is ever selected for you.
 2. Edit **Title** or **Privacy** if needed; each change is written to YouTube immediately and the field updates once YouTube confirms.
 3. Start OBS. **Stage** goes `waiting_for_encoder` → `ready_to_go_live`; press **Go Live**.
 4. After the service stop OBS. **Stage** shows `stream_stopping` while YouTube catches up (up to a minute), then `ready_to_end`; press **End Stream**. The broadcast leaves the panel and the selection clears — the same confirmation Schedule and Delete give.
@@ -86,22 +88,33 @@ The web UI is for Home Assistant admins only.
 
 ## Entities
 
-### YouTube Live — the selected broadcast
+### One device per custom stream key
+
+Each device is named after its key in Studio (renaming the key renames the device; entity IDs stay stable, keyed on the stream's immutable ID).
 
 | Entity | Type | Notes |
 | --- | --- | --- |
-| Broadcast | select | attributes: `id`, `scheduled_start`, `privacy`, `lifecycle`, `thumbnail_url`, `watch_url` |
+| Broadcast | select | the broadcasts bound to this key; attributes: `id`, `scheduled_start`, `privacy`, `lifecycle`, `thumbnail_url`, `watch_url` |
 | Title | text | applied on Enter |
 | Privacy | select | applied on change |
 | Stage | sensor (enum) | see table above |
 | Scheduled start | sensor (timestamp) | Home Assistant renders it relatively (*in 20 minutes*) |
 | Thumbnail | image | unavailable while the broadcast has none |
 | Live | binary sensor (running) | on for `live`, `stream_stopping`, `ready_to_end` — for ON AIR lights and notifications |
-| Encoder connected | binary sensor (connectivity) | on while YouTube is receiving the stream |
+| Encoder connected | binary sensor (connectivity) | on while YouTube is receiving on **this key** — truthful even with nothing selected |
 | Go Live / End Stream | buttons | available only in `ready_to_go_live` / `ready_to_end` |
 | Delete | button | removes the selected broadcast from YouTube; unavailable while it is live or transitioning |
-| Fast refresh / Fast refresh remaining | switch / sensor | the fast-poll window (below) |
-| Broadcast status, Stream health, Channel, Authorization | sensors (diagnostic) | raw YouTube values, connected channel, `authorized` / `unauthorized` |
+| Broadcast status | sensor (diagnostic) | the selected broadcast's raw lifecycle |
+| Stream health | sensor (diagnostic) | the key's ingestion state/health, selection or not |
+| Stream key | sensor (diagnostic) | the key string — match on it to show the right encoder/OBS view |
+
+### YouTube Live Control — the hub
+
+| Entity | Type | Notes |
+| --- | --- | --- |
+| Fast refresh / Fast refresh remaining | switch / sensor | the global fast-poll window (below) |
+| Channel | sensor (diagnostic) | the connected channel |
+| Authorization | sensor (diagnostic) | `authorized` / `unauthorized` |
 
 ### YouTube Live Scheduling
 
@@ -112,11 +125,11 @@ The web UI is for Home Assistant admins only.
 | Privacy | select — pre-filled from the preset, overridable for this stream |
 | Schedule | button |
 
-Both devices appear under **Settings → Devices & services → MQTT**; Home Assistant's auto-generated dashboard gives each its own card. Invalid input (empty title, over 100 characters, unknown option) is rejected and the field snaps back.
+All devices appear under **Settings → Devices & services → MQTT**, the stream-key devices and Scheduling hanging off the hub; Home Assistant's auto-generated dashboard gives each its own card. Invalid input (empty title, over 100 characters, unknown option) is rejected and the field snaps back. A key deleted in Studio removes its device automatically — even if the deletion happened while the add-on was off.
 
 ## Safety
 
-Every write is verified against YouTube first and read back before Home Assistant is updated. State is retained on MQTT, commands are not, and replayed commands are ignored, so restarts never start or stop a stream. While a change is in flight to YouTube, every input on both devices (selects, fields, buttons, switch) is unavailable and comes back together once the readback lands — after Schedule, the Broadcast select reappears only once the new stream is one of its options. The sensors keep reporting throughout.
+Every write is verified against YouTube first and read back before Home Assistant is updated. State is retained on MQTT, commands are not, and replayed commands are ignored, so restarts never start or stop a stream. While a change is in flight to YouTube, every input on **the device it touches** is unavailable and comes back together once the readback lands; other stream keys' devices keep working, so one hall's Go Live never locks out another's. Writes themselves still run strictly one at a time through a single queue. The sensors keep reporting throughout.
 
 - Broadcasts are written with `enableAutoStart` and `enableAutoStop` **false**: OBS starting or stopping never transitions a broadcast; only the buttons do.
 - **Go Live** requires YouTube to report the stream `active`. **End Stream** requires the stream to have stopped, which YouTube reports up to a minute after OBS stops — the `stream_stopping` stage.
@@ -125,12 +138,12 @@ Every write is verified against YouTube first and read back before Home Assistan
 
 ## Polling
 
-YouTube's API has no push, so the add-on polls — only while a broadcast is selected — in three tiers driven by human presence:
+YouTube's API has no push, so the add-on polls. One cycle is three list calls — broadcasts upcoming, broadcasts active, stream keys — refreshing the device roster, every select, every broadcast and every key's encoder state at a flat **3 quota units per cycle however many stream keys exist**. Three tiers driven by human presence:
 
 | Tier | When | Cadence |
 | --- | --- | --- |
-| Idle | nothing happening | **Idle refresh** (also refreshes the broadcast list) |
-| Live | broadcast on air | **Live refresh** |
+| Idle | nothing happening | **Idle refresh** |
+| Live | a selected broadcast is on air on any device | **Live refresh** |
 | Fast | **Fast refresh** window | **Fast refresh** cadence for **Fast refresh duration** |
 
 Any interaction with the Home Assistant entities arms the fast window — including a refused button press, which is exactly when a fast answer is wanted. The add-on switches it off when the window expires; the switch is there to arm it by hand.
@@ -145,8 +158,8 @@ Each option is described on the add-on's Configuration tab.
 | --- | --- | --- |
 | Google client ID / secret | — | the OAuth client |
 | OAuth redirect base URL | unset | https base URL forwarding to port 8098; the redirect becomes `<url>/oauth/callback` |
-| Idle refresh | 600 s | list and selected-broadcast checks while nothing is happening (60–3600) |
-| Live refresh | 60 s | selected-broadcast checks while on air (15–600) |
+| Idle refresh | 600 s | poll cycle while nothing is happening (60–3600) |
+| Live refresh | 60 s | poll cycle while any device is on air (15–600) |
 | Fast refresh | 3 s | cadence inside a fast-refresh window (1–30) |
 | Fast refresh duration | 300 s | how long the window stays on after an interaction (60–3600) |
 | Log level | info | debug / info / warn / error |
@@ -166,7 +179,8 @@ Each option is described on the add-on's Configuration tab.
 | `redirect_uri_mismatch` | with a redirect base URL: Web client must register `<url>/oauth/callback`; without: use a Desktop client |
 | Browser cannot reach `localhost:8098` after consent | expected — paste the URL into the web UI |
 | Google's chooser does not list the channel | the account is not a Brand Account manager of it |
-| Broadcast select is empty although a stream is scheduled | wrong channel (check **Channel**), or the broadcast is under *Never started* in the web UI |
+| Broadcast select is empty although a stream is scheduled | the broadcast is bound to a different key (check its device), the wrong channel is connected (check **Channel**), the broadcast has no custom stream key (web UI shows it), or it is under *Never started* in the web UI |
+| A stream key has no device | it is YouTube's auto-generated default key; create a named key in Studio and bind broadcasts to it |
 | Go Live unavailable | read **Stage**: `waiting_for_encoder` — OBS not sending; `no_stream_key` — fix in the web UI |
 | End Stream unavailable after stopping OBS | `stream_stopping` for up to a minute; a tap on End Stream arms fast polling |
 | Schedule greyed | no preset, preset without stream key, or a start in the past |
