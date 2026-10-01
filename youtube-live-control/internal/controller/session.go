@@ -9,8 +9,9 @@ import (
 	"github.com/jacobgad/youtube-live-control/internal/youtube"
 )
 
-// noBroadcastLabel is the Broadcast select's state while nothing is selected and its
-// only option while nothing is scheduled; MQTT selects need at least one option.
+// noBroadcastLabel is the Broadcast select's only option while nothing is scheduled;
+// MQTT selects need at least one option. "Nothing selected" is published as None,
+// since Home Assistant ignores a select state that is not one of the options.
 const noBroadcastLabel = "No broadcast selected"
 
 // staleAfter hides scheduled-but-never-started broadcasts from the volunteer's select;
@@ -155,7 +156,7 @@ func (s *session) selectedLabel() string {
 			return s.labels[i]
 		}
 	}
-	return noBroadcastLabel
+	return mqttNone
 }
 
 func (s *session) idForLabel(label string) (id string, ok bool) {

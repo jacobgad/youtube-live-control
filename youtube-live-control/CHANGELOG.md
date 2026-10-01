@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.9.1
+
+- Fix: the Preset select did not clear after Schedule, and the Broadcast select kept a stale selection after End Stream or Delete. "Nothing selected" was published as a placeholder label that is not one of the options, which Home Assistant ignores; it is now published as `None`. Re-picking the apparently still-selected preset sent no command, which is why Start and Privacy then stayed empty.
+
 ## 1.9.0
 
 - **One in-flight lock.** While any change is being written to YouTube — Schedule, Go Live, End Stream, Delete, Title or Privacy, or the same actions from the web UI — every input on both devices is unavailable and returns together once the readback lands, so after Schedule the Broadcast select reappears with the new stream already in it. Sensors stay live. Replaces the per-button busy flags; a Title or Privacy edit made while another change is in flight is dropped and the field snaps back on readback.

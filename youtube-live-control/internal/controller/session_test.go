@@ -115,7 +115,7 @@ func TestSetBroadcastsNeverSelectsAndHidesStale(t *testing.T) {
 	if len(s.broadcasts) != 2 || len(s.stale) != 1 || s.stale[0].ID != "old" {
 		t.Fatalf("visible %d stale %d", len(s.broadcasts), len(s.stale))
 	}
-	if s.selectedLabel() != noBroadcastLabel || s.selectOptions()[0] != s.labels[0] {
+	if s.selectedLabel() != mqttNone || s.selectOptions()[0] != s.labels[0] {
 		t.Fatalf("label %q options %v", s.selectedLabel(), s.selectOptions())
 	}
 
@@ -129,8 +129,8 @@ func TestSetBroadcastsNeverSelectsAndHidesStale(t *testing.T) {
 	if lost := s.setBroadcasts(nil, now); lost {
 		t.Fatal("clearing an already-empty selection is not a loss")
 	}
-	if opts := s.selectOptions(); len(opts) != 1 || opts[0] != noBroadcastLabel {
-		t.Fatalf("empty options = %v", opts)
+	if opts := s.selectOptions(); len(opts) != 1 || opts[0] != noBroadcastLabel || s.selectedLabel() != mqttNone {
+		t.Fatalf("empty options = %v, label %q", opts, s.selectedLabel())
 	}
 	if len(s.allStarts()) != 0 {
 		t.Fatal("allStarts should be empty")

@@ -59,7 +59,7 @@ func (sc *scheduling) presetLabel() string {
 			return sc.labels[i]
 		}
 	}
-	return noPresetLabel
+	return mqttNone
 }
 
 func (sc *scheduling) presetIDForLabel(label string) (string, bool) {

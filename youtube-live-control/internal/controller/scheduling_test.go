@@ -158,7 +158,7 @@ func TestClearAfterSchedule(t *testing.T) {
 		t.Fatalf("privacy should follow the preset, got %q", sc.privacy)
 	}
 	sc.clear()
-	if sc.presetID != "" || !sc.start.IsZero() || sc.privacy != "" || sc.canSchedule(now) || sc.presetLabel() != noPresetLabel {
+	if sc.presetID != "" || !sc.start.IsZero() || sc.privacy != "" || sc.canSchedule(now) || sc.presetLabel() != mqttNone {
 		t.Fatalf("not cleared: %+v", sc)
 	}
 }
@@ -189,7 +189,7 @@ func TestPresetListChangesKeepOrDropSelection(t *testing.T) {
 		t.Fatalf("label lookup = %q %v", id, ok)
 	}
 	sc.setPresets([]preset.Preset{sundayPreset()})
-	if sc.presetID != "" || sc.presetLabel() != noPresetLabel {
+	if sc.presetID != "" || sc.presetLabel() != mqttNone {
 		t.Fatalf("deleted preset should clear the selection: %q", sc.presetID)
 	}
 	sc.setPresets(nil)
