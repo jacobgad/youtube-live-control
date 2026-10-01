@@ -48,7 +48,7 @@ type Controller struct {
 
 	mu      sync.Mutex
 	session session
-	busy    map[string]bool
+	locked  bool
 
 	ops        chan queuedOp
 	statusKick chan struct{}
@@ -89,7 +89,6 @@ func New(deps Deps) *Controller {
 		log:        log,
 		now:        now,
 		pub:        newPublisher(deps.MQTT, deps.Origin, log),
-		busy:       map[string]bool{},
 		ops:        make(chan queuedOp, commandBuffer),
 		statusKick: make(chan struct{}, 1),
 		opsDone:    make(chan struct{}),
@@ -197,49 +196,39 @@ func (c *Controller) background(fn func(context.Context)) {
 	}()
 }
 
-// ErrInProgress is returned when the same command is already queued or running.
-var ErrInProgress = errors.New("that action is already in progress")
+// ErrInProgress is returned while another change is in flight to YouTube.
+var ErrInProgress = errors.New("another change is still in progress")
 
-// One in-flight instance per command name is the real protection against double
-// taps; greyed buttons and disabled forms are only the visible side of it.
-func (c *Controller) claim(name string) bool {
+// One lock for every mutation is the real protection against double taps and
+// overlapping edits; unavailable entities and disabled forms are its visible side.
+func (c *Controller) lock() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.busy[name] {
+	if c.locked {
 		return false
 	}
-	c.busy[name] = true
+	c.locked = true
 	return true
 }
 
-func (c *Controller) release(name string) {
+func (c *Controller) unlock() {
 	c.mu.Lock()
-	delete(c.busy, name)
+	c.locked = false
 	c.mu.Unlock()
 }
 
-// The slot is claimed inline so presses run in press order; a duplicate press or a
-// full queue drops the press rather than block the broker's delivery goroutine.
+// The lock is taken inline so a press while locked is dropped rather than queued
+// behind the running change, which is what makes a double tap harmless.
 func (c *Controller) enqueue(name string, op func(context.Context) error) {
-	if !c.claim(name) {
-		c.log.Info("command_ignored_in_progress", "command", name)
+	if !c.lock() {
+		c.log.Info("command_ignored_locked", "command", name)
 		return
 	}
 	c.publishUpdate()
 	select {
 	case c.ops <- queuedOp{name: name, run: op}:
 	default:
-		c.release(name)
-		c.log.Warn("command_dropped_busy", "command", name)
-	}
-}
-
-// Edits are not single-flight: a second title typed while the first is being written
-// must still land, and the readback settles the field either way.
-func (c *Controller) enqueueEdit(name string, op func(context.Context) error) {
-	select {
-	case c.ops <- queuedOp{name: name, run: op}:
-	default:
+		c.unlock()
 		c.log.Warn("command_dropped_busy", "command", name)
 	}
 }
@@ -247,9 +236,10 @@ func (c *Controller) enqueueEdit(name string, op func(context.Context) error) {
 // ctx bounds only the wait; the operation runs under lifetime. An op whose caller has
 // already given up is skipped, so a timed-out web request cannot create a duplicate.
 func (c *Controller) run(ctx context.Context, name string, op func(context.Context) error) error {
-	if !c.claim(name) {
+	if !c.lock() {
 		return ErrInProgress
 	}
+	c.publishUpdate()
 	done := make(chan error, 1)
 	guarded := func(opCtx context.Context) error {
 		if err := ctx.Err(); err != nil {
@@ -260,7 +250,7 @@ func (c *Controller) run(ctx context.Context, name string, op func(context.Conte
 	select {
 	case c.ops <- queuedOp{name: name, run: guarded, done: done}:
 	case <-ctx.Done():
-		c.release(name)
+		c.unlock()
 		return ctx.Err()
 	}
 	select {
@@ -280,7 +270,7 @@ func (c *Controller) opsLoop() {
 		case op := <-c.ops:
 			c.log.Info("command_started", "command", op.name)
 			err := op.run(c.lifetime)
-			c.release(op.name)
+			c.unlock()
 			c.log.Info("command_finished", "command", op.name, "ok", err == nil)
 			if op.done != nil {
 				op.done <- err
@@ -353,12 +343,13 @@ func (c *Controller) snapshot() snapshot {
 		status:        "none",
 		fastMode:      c.session.fastActive(now),
 		fastRemaining: c.session.fastRemainingMinutes(now),
-		gates:         computeGates(c.session.authorized, current, c.busy["go_live"], c.busy["end_stream"]),
+		unlocked:      !c.locked,
+		gates:         computeGates(c.session.authorized, current),
 		presetLabel:   c.session.sched.presetLabel(),
 		start:         c.session.sched.startPayload(),
 		schedPrivacy:  c.session.sched.privacy,
-		canDelete:     canDelete(c.session.authorized, current, c.busy["delete"]),
-		canSchedule:   c.session.authorized && !c.busy["schedule"] && c.session.sched.canSchedule(now),
+		canDelete:     canDelete(c.session.authorized, current),
+		canSchedule:   c.session.authorized && c.session.sched.canSchedule(now),
 	}
 	if b != nil {
 		snap.title = b.Title
@@ -427,7 +418,7 @@ func (c *Controller) enterTitle(raw string) {
 		c.snapBack(mqtt.TitleState)
 		return
 	}
-	c.enqueueEdit("title", func(ctx context.Context) error {
+	c.enqueue("title", func(ctx context.Context) error {
 		return c.editSelected(ctx, mqtt.TitleState, func(b *youtube.Broadcast) { b.Title = title })
 	})
 }
@@ -439,7 +430,7 @@ func (c *Controller) selectPrivacy(privacy string) {
 		c.snapBack(mqtt.PrivacyState)
 		return
 	}
-	c.enqueueEdit("privacy", func(ctx context.Context) error {
+	c.enqueue("privacy", func(ctx context.Context) error {
 		return c.editSelected(ctx, mqtt.PrivacyState, func(b *youtube.Broadcast) { b.PrivacyStatus = privacy })
 	})
 }

@@ -101,6 +101,23 @@ func TestButtonsGateOnOwnAvailabilityTopic(t *testing.T) {
 	}
 }
 
+func TestCommandEntitiesCarryTheLock(t *testing.T) {
+	for id, m := range messagesByObject(t) {
+		if _, hasCommand := m.Payload["command_topic"]; !hasCommand {
+			continue
+		}
+		found := false
+		for _, a := range m.Payload["availability"].([]map[string]any) {
+			if a["topic"] == Lock {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s lacks the lock availability", id)
+		}
+	}
+}
+
 func TestPlatformNativeClasses(t *testing.T) {
 	byID := messagesByObject(t)
 	stage := byID[NodeID+"_stage"]

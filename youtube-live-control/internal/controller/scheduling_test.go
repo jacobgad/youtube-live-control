@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 	"time"
@@ -97,6 +98,53 @@ func TestEnterStartRejectsInvalidPayload(t *testing.T) {
 	if c.session.sched.start.IsZero() {
 		t.Fatal("valid payload must set start")
 	}
+	c.inflight.Wait()
+}
+
+func TestLockIsExclusive(t *testing.T) {
+	c := &Controller{now: time.Now, opts: testOptions, log: slog.Default(), pub: newPublisher(nullConn{}, mqtt.Origin{}, slog.Default())}
+	if !c.snapshot().unlocked {
+		t.Fatal("inputs must start available")
+	}
+	if !c.lock() || c.lock() {
+		t.Fatal("the lock must be exclusive")
+	}
+	if c.snapshot().unlocked {
+		t.Fatal("a held lock must publish the inputs unavailable")
+	}
+	c.unlock()
+	if !c.snapshot().unlocked || !c.lock() {
+		t.Fatal("unlock must release")
+	}
+}
+
+func TestEnqueueDropsWhileLockedAndReleasesAfterFailure(t *testing.T) {
+	c := &Controller{now: time.Now, opts: testOptions, log: slog.Default(), pub: newPublisher(nullConn{}, mqtt.Origin{}, slog.Default()), ops: make(chan queuedOp, commandBuffer), opsDone: make(chan struct{})}
+	c.lifetime, c.endLife = context.WithCancel(context.Background())
+	go c.opsLoop()
+
+	started := make(chan struct{})
+	finish := make(chan struct{})
+	runs := 0
+	c.enqueue("first", func(context.Context) error { runs++; close(started); <-finish; return errors.New("boom") })
+	<-started
+	c.enqueue("second", func(context.Context) error { runs++; return nil })
+	if c.snapshot().unlocked {
+		t.Fatal("inputs must be unavailable while the first command runs")
+	}
+	close(finish)
+	deadline := time.Now().Add(2 * time.Second)
+	for !c.snapshot().unlocked {
+		if time.Now().After(deadline) {
+			t.Fatal("lock not released after the failing command")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if runs != 1 {
+		t.Fatalf("second press must be dropped while locked; ran %d", runs)
+	}
+	c.endLife()
+	<-c.opsDone
 	c.inflight.Wait()
 }
 

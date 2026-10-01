@@ -37,6 +37,7 @@ type snapshot struct {
 	status         string
 	fastMode       bool
 	fastRemaining  int
+	unlocked       bool
 	gates          gates
 	canDelete      bool
 	presetLabel    string
@@ -116,6 +117,7 @@ func render(snap snapshot, origin mqtt.Origin) []message {
 		out = append(out, message{topic, ""})
 	}
 	out = append(out,
+		message{mqtt.Lock, onOff(snap.unlocked, mqtt.PayloadOnline, mqtt.PayloadOffline)},
 		message{mqtt.AuthState, onOff(snap.authorized, mqtt.PayloadAuthorized, mqtt.PayloadUnauthorized)},
 		message{mqtt.ChannelState, snap.channel},
 		message{mqtt.BroadcastState, snap.selectedLabel},

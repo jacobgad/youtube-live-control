@@ -21,6 +21,7 @@ const (
 	SchedulingIdentifier = "ylc:scheduling"
 
 	ControllerAvailability = Prefix + "/controller/availability"
+	Lock                   = Prefix + "/lock"
 	AuthState              = Prefix + "/auth/state"
 	ChannelState           = Prefix + "/channel/state"
 

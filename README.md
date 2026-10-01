@@ -28,6 +28,7 @@ Prefix `ylc/`. State retained, commands not.
 | Topic | Purpose |
 | --- | --- |
 | `controller/availability` | online/offline; also the Last Will |
+| `lock` | in-flight lock; every input on both devices lists it as an availability |
 | `auth/state`, `channel/state` | `authorized`/`unauthorized`; connected channel |
 | `broadcast/{state,set,attributes}` | Broadcast select; attributes `id`, `scheduled_start`, `privacy`, `lifecycle`, `thumbnail_url`, `watch_url` |
 | `title/{state,set}`, `privacy/{state,set}` | written to YouTube on change |

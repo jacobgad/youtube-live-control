@@ -62,25 +62,19 @@ func TestStage(t *testing.T) {
 }
 
 func TestGatesFollowStage(t *testing.T) {
-	if g := computeGates(true, stageReadyToGoLive, false, false); !g.goLive || g.end {
+	if g := computeGates(true, stageReadyToGoLive); !g.goLive || g.end {
 		t.Fatalf("ready_to_go_live gates = %+v", g)
 	}
-	if g := computeGates(true, stageReadyToEnd, false, false); g.goLive || !g.end {
+	if g := computeGates(true, stageReadyToEnd); g.goLive || !g.end {
 		t.Fatalf("ready_to_end gates = %+v", g)
 	}
 	for _, s := range []string{stageLive, stageStreamStopping, stageStarting, stageEnding, stageWaitingForEncoder, stageNoStreamKey, stageNoBroadcast, stageEnded} {
-		if g := computeGates(true, s, false, false); g.goLive || g.end {
+		if g := computeGates(true, s); g.goLive || g.end {
 			t.Fatalf("%s should gate both buttons off: %+v", s, g)
 		}
 	}
-	if g := computeGates(false, stageReadyToGoLive, false, false); g.goLive {
+	if g := computeGates(false, stageReadyToGoLive); g.goLive {
 		t.Fatal("unauthorized must gate off")
-	}
-	if g := computeGates(true, stageReadyToGoLive, true, false); g.goLive {
-		t.Fatal("an in-flight Go Live must grey the button")
-	}
-	if g := computeGates(true, stageReadyToEnd, false, true); g.end {
-		t.Fatal("an in-flight End must grey the button")
 	}
 	for _, s := range []string{stageLive, stageStreamStopping, stageReadyToEnd} {
 		if !isOnAir(s) {
@@ -94,17 +88,17 @@ func TestGatesFollowStage(t *testing.T) {
 
 func TestCanDelete(t *testing.T) {
 	for _, s := range []string{stageWaitingForEncoder, stageReadyToGoLive, stageNoStreamKey, stageEnded} {
-		if !canDelete(true, s, false) {
+		if !canDelete(true, s) {
 			t.Fatalf("%s should allow delete", s)
 		}
 	}
 	for _, s := range []string{stageLive, stageStreamStopping, stageReadyToEnd, stageStarting, stageEnding, stageNoBroadcast} {
-		if canDelete(true, s, false) {
+		if canDelete(true, s) {
 			t.Fatalf("%s must refuse delete", s)
 		}
 	}
-	if canDelete(false, stageReadyToGoLive, false) || canDelete(true, stageReadyToGoLive, true) {
-		t.Fatal("unauthorized or in-flight must refuse delete")
+	if canDelete(false, stageReadyToGoLive) {
+		t.Fatal("unauthorized must refuse delete")
 	}
 }
 

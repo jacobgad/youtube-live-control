@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.9.0
+
+- **One in-flight lock.** While any change is being written to YouTube — Schedule, Go Live, End Stream, Delete, Title or Privacy, or the same actions from the web UI — every input on both devices is unavailable and returns together once the readback lands, so after Schedule the Broadcast select reappears with the new stream already in it. Sensors stay live. Replaces the per-button busy flags; a Title or Privacy edit made while another change is in flight is dropped and the field snaps back on readback.
+
 ## 1.8.0
 
 - Scheduling device gains **Privacy**, pre-filled from the preset and overridable per stream; cleared with the rest after Schedule.

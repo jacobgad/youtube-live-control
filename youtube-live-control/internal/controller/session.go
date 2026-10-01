@@ -238,15 +238,15 @@ type gates struct {
 	end    bool
 }
 
-func computeGates(authorized bool, current string, goLiveBusy, endBusy bool) gates {
+func computeGates(authorized bool, current string) gates {
 	if !authorized {
 		return gates{}
 	}
-	return gates{goLive: current == stageReadyToGoLive && !goLiveBusy, end: current == stageReadyToEnd && !endBusy}
+	return gates{goLive: current == stageReadyToGoLive, end: current == stageReadyToEnd}
 }
 
-func canDelete(authorized bool, current string, busy bool) bool {
-	if !authorized || busy || current == stageNoBroadcast {
+func canDelete(authorized bool, current string) bool {
+	if !authorized || current == stageNoBroadcast {
 		return false
 	}
 	return !isOnAir(current) && current != stageStarting && current != stageEnding

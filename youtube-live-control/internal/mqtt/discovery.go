@@ -120,14 +120,20 @@ func orEmpty(list []string) []string {
 	return list
 }
 
+// Every input shares one lock: while a change is in flight to YouTube nothing can be
+// acted on, and everything returns together on readback.
 func commandEntity(node, component, object, name, icon string, fields map[string]any, o Origin) Message {
 	fields["optimistic"] = false
 	fields["retain"] = false
 	fields["qos"] = 1
 	m := base(node, component, object, name, icon, fields, o)
-	m.Payload["availability"] = []map[string]any{controllerAvailability(), authAvailability()}
+	m.Payload["availability"] = []map[string]any{controllerAvailability(), authAvailability(), lockAvailability()}
 	m.Payload["availability_mode"] = "all"
 	return m
+}
+
+func lockAvailability() map[string]any {
+	return map[string]any{"topic": Lock, "payload_available": PayloadOnline, "payload_not_available": PayloadOffline}
 }
 
 func sensor(object, name, icon, stateTopic string, extra map[string]any, category string, o Origin) Message {
@@ -177,6 +183,7 @@ func button(node, object, name, icon, pressTopic, availabilityTopic string, o Or
 	m.Payload["availability"] = []map[string]any{
 		controllerAvailability(),
 		authAvailability(),
+		lockAvailability(),
 		{"topic": availabilityTopic, "payload_available": PayloadOnline, "payload_not_available": PayloadOffline},
 	}
 	m.Payload["availability_mode"] = "all"
