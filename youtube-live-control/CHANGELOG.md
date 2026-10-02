@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.0.1
+
+- Fix: pressing **Go Live** (or End Stream/Delete) could clear the Broadcast select and refuse the command. Buttons re-verified against a fresh YouTube read before acting, and a read whose bound stream came back different — or empty — was treated as a rebind, moving the broadcast off its device and wiping the selection. Buttons now act on the same polled state their availability was computed from; YouTube itself refuses a transition that is no longer valid, and every write is still read back before Home Assistant updates.
+
 ## 2.0.0
 
 **Breaking: one Home Assistant device per custom stream key.** Entity IDs and MQTT topics change; dashboards and automations referencing the old *YouTube Live* device need re-pointing.

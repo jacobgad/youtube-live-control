@@ -129,7 +129,7 @@ All devices appear under **Settings → Devices & services → MQTT**, the strea
 
 ## Safety
 
-Every write is verified against YouTube first and read back before Home Assistant is updated. State is retained on MQTT, commands are not, and replayed commands are ignored, so restarts never start or stop a stream. While a change is in flight to YouTube, every input on **the device it touches** is unavailable and comes back together once the readback lands; other stream keys' devices keep working, so one hall's Go Live never locks out another's. Writes themselves still run strictly one at a time through a single queue. The sensors keep reporting throughout.
+Commands act on the state shown in Home Assistant — YouTube itself refuses a transition that is no longer valid — and every write is read back before Home Assistant is updated. State is retained on MQTT, commands are not, and replayed commands are ignored, so restarts never start or stop a stream. While a change is in flight to YouTube, every input on **the device it touches** is unavailable and comes back together once the readback lands; other stream keys' devices keep working, so one hall's Go Live never locks out another's. Writes themselves still run strictly one at a time through a single queue. The sensors keep reporting throughout.
 
 - Broadcasts are written with `enableAutoStart` and `enableAutoStop` **false**: OBS starting or stopping never transitions a broadcast; only the buttons do.
 - **Go Live** requires YouTube to report the stream `active`. **End Stream** requires the stream to have stopped, which YouTube reports up to a minute after OBS stops — the `stream_stopping` stage.

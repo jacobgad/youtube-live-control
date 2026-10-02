@@ -1,5 +1,5 @@
 // Package controller owns the Home Assistant session, polling and every command's
-// verify → write → read back path; nothing is published optimistically.
+// write → read back path; nothing is published optimistically.
 package controller
 
 import (

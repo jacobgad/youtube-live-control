@@ -75,7 +75,7 @@ func (c *Controller) applyAndPublish(ctx context.Context, b youtube.Broadcast) {
 }
 
 func (c *Controller) goLive(ctx context.Context, deviceID string) error {
-	id, b, stream, ok := c.verifySelected(ctx, deviceID, "go_live")
+	id, b, stream, ok := c.selectedState(deviceID, "go_live")
 	if !ok {
 		return ErrNoSelection
 	}
@@ -112,7 +112,7 @@ func (c *Controller) goLive(ctx context.Context, deviceID string) error {
 }
 
 func (c *Controller) endStream(ctx context.Context, deviceID string) error {
-	id, b, stream, ok := c.verifySelected(ctx, deviceID, "end_stream")
+	id, b, stream, ok := c.selectedState(deviceID, "end_stream")
 	if !ok {
 		return ErrNoSelection
 	}
@@ -144,7 +144,7 @@ func (c *Controller) endStream(ctx context.Context, deviceID string) error {
 }
 
 func (c *Controller) deleteSelected(ctx context.Context, deviceID string) error {
-	id, b, _, ok := c.verifySelected(ctx, deviceID, "delete")
+	id, b, _, ok := c.selectedState(deviceID, "delete")
 	if !ok {
 		return ErrNoSelection
 	}
@@ -167,50 +167,17 @@ func (c *Controller) deleteBroadcast(ctx context.Context, id string) error {
 	return nil
 }
 
-// Commands decide on a fresh read, never on the last poll.
-func (c *Controller) verifySelected(ctx context.Context, deviceID, op string) (string, youtube.Broadcast, youtube.StreamStatus, bool) {
+// Commands act on the session as polled — the same state the Home Assistant gates
+// were computed from; YouTube itself rejects a transition that is no longer valid.
+func (c *Controller) selectedState(deviceID, op string) (string, youtube.Broadcast, youtube.StreamStatus, bool) {
 	c.mu.Lock()
-	var id, expectedStream string
-	if d := c.session.device(deviceID); d != nil {
-		id, expectedStream = d.selectedID, d.stream.ID
-	}
-	c.mu.Unlock()
-	if id == "" {
+	defer c.mu.Unlock()
+	d := c.session.device(deviceID)
+	if d == nil || d.selected() == nil {
 		c.log.Warn("command_refused", "command", op, "deviceId", deviceID, "reason", "no_broadcast_selected")
 		return "", youtube.Broadcast{}, youtube.StreamStatus{}, false
 	}
-	b, ok, err := c.yt.GetBroadcast(ctx, id)
-	if err != nil {
-		c.log.Error("operation_failed", "operation", "verify", "command", op, "id", id, "error", err)
-		return "", youtube.Broadcast{}, youtube.StreamStatus{}, false
-	}
-	if !ok {
-		c.log.Warn("broadcast_missing", "id", id)
-		c.dropMissing(ctx, id)
-		return "", youtube.Broadcast{}, youtube.StreamStatus{}, false
-	}
-	// A rebind discovered here moves the broadcast to its new device; acting on it
-	// from this device would bypass the gaining device's lock.
-	if b.BoundStreamID != expectedStream {
-		c.log.Warn("command_refused", "command", op, "id", id, "deviceId", deviceID, "reason", "broadcast_rebound")
-		c.applyAndPublish(ctx, b)
-		return "", youtube.Broadcast{}, youtube.StreamStatus{}, false
-	}
-	var stream youtube.StreamStatus
-	if b.BoundStreamID != "" {
-		stream, err = c.yt.StreamStatus(ctx, b.BoundStreamID)
-		if err != nil {
-			c.log.Error("operation_failed", "operation", "stream_status", "command", op, "id", id, "error", err)
-			return "", youtube.Broadcast{}, youtube.StreamStatus{}, false
-		}
-	}
-	c.mu.Lock()
-	c.session.apply(b)
-	if d := c.session.deviceByStream(b.BoundStreamID); d != nil {
-		d.stream.Status = stream
-	}
-	c.mu.Unlock()
-	return id, b, stream, true
+	return d.selectedID, *d.selected(), d.stream.Status, true
 }
 
 func (c *Controller) waitForLifecycle(ctx context.Context, id, want string) bool {

@@ -355,22 +355,6 @@ type streamListResponse struct {
 	Items []streamItem `json:"items"`
 }
 
-// StreamStatus fetches the ingestion status of one liveStream. Costs 1 quota unit.
-func (c *Client) StreamStatus(ctx context.Context, streamID string) (StreamStatus, error) {
-	var out streamListResponse
-	err := c.do(ctx, http.MethodGet, apiBase+"/liveStreams", url.Values{
-		"part": {"id,status"},
-		"id":   {streamID},
-	}, nil, &out)
-	if err != nil {
-		return StreamStatus{}, err
-	}
-	if len(out.Items) == 0 {
-		return StreamStatus{}, nil
-	}
-	return StreamStatus{Status: out.Items[0].Status.StreamStatus, Health: out.Items[0].Status.HealthStatus.Status}, nil
-}
-
 // ListStreams lists the channel's stream keys with their ingestion status. Costs 1 quota unit.
 func (c *Client) ListStreams(ctx context.Context) ([]Stream, error) {
 	var out streamListResponse
