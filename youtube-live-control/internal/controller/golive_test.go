@@ -266,7 +266,7 @@ func runGoLivePress(t *testing.T, monitor bool, latency, fastRefresh time.Durati
 	selectedAt := len(conn.payloads(topics.BroadcastState()))
 	conn.deliver(topics.GoLivePress(), "PRESS")
 
-	if !waitUntil(t, 15*time.Second, func() bool { return conn.state(topics.StageState()) == "live" }) {
+	if !waitUntil(t, 15*time.Second, func() bool { return conn.state(topics.StageState()) == "Live" }) {
 		yt.mu.Lock()
 		apiLog := strings.Join(yt.log, "\n")
 		transitions := fmt.Sprintf("%v", yt.transitions)

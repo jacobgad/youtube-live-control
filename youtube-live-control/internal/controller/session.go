@@ -28,16 +28,16 @@ const (
 )
 
 const (
-	stageNoBroadcast       = "no_broadcast"
-	stageNoStreamKey       = "no_stream_key"
-	stageWaitingForEncoder = "waiting_for_encoder"
-	stageReadyToGoLive     = "ready_to_go_live"
-	stageStarting          = "starting"
-	stageLive              = "live"
-	stageStreamStopping    = "stream_stopping"
-	stageReadyToEnd        = "ready_to_end"
-	stageEnding            = "ending"
-	stageEnded             = "ended"
+	stageNoBroadcast       = "No broadcast"
+	stageNoStreamKey       = "No stream key"
+	stageWaitingForEncoder = "Waiting for encoder"
+	stageReadyToGoLive     = "Ready to go live"
+	stageStarting          = "Starting"
+	stageLive              = "Live"
+	stageStreamStopping    = "Stream stopping"
+	stageReadyToEnd        = "Ready to end"
+	stageEnding            = "Ending"
+	stageEnded             = "Ended"
 )
 
 // deviceState is one custom stream key's Home Assistant device: the key itself, the
@@ -349,7 +349,7 @@ func broadcastLabels(list []youtube.Broadcast) []string {
 	return labels
 }
 
-// stream_stopping is live + active + noData: the encoder has gone but YouTube has not
+// Stream stopping is live + active + noData: the encoder has gone but YouTube has not
 // noticed yet, which is exactly why End stays unavailable.
 func stage(b *youtube.Broadcast, stream youtube.StreamStatus, pending pendingOp) string {
 	switch pending {

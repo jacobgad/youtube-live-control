@@ -60,20 +60,20 @@ Each custom stream key on the channel is its own Home Assistant device, named af
 
 1. On that key's device, pick the stream in **Broadcast** (sorted live-first, then soonest — the right one is first). Nothing is ever selected for you.
 2. Edit **Title** or **Privacy** if needed; each change is written to YouTube immediately and the field updates once YouTube confirms.
-3. Start OBS. **Stage** goes `waiting_for_encoder` → `ready_to_go_live`; press **Go Live**.
-4. After the service stop OBS. **Stage** shows `stream_stopping` while YouTube catches up (up to a minute), then `ready_to_end`; press **End Stream**. The broadcast leaves the panel and the selection clears — the same confirmation Schedule and Delete give.
+3. Start OBS. **Stage** goes `Waiting for encoder` → `Ready to go live`; press **Go Live**.
+4. After the service stop OBS. **Stage** shows `Stream stopping` while YouTube catches up (up to a minute), then `Ready to end`; press **End Stream**. The broadcast leaves the panel and the selection clears — the same confirmation Schedule and Delete give.
 
 | Stage | Meaning |
 | --- | --- |
-| `no_broadcast` | nothing selected |
-| `no_stream_key` | the broadcast has no stream key — fix it in the web UI |
-| `waiting_for_encoder` | scheduled; OBS is not sending |
-| `ready_to_go_live` | YouTube is receiving the encoder — **Go Live** available |
-| `starting` / `ending` | transition in progress |
-| `live` | on air |
-| `stream_stopping` | OBS stopped; YouTube has not registered it yet |
-| `ready_to_end` | stream stopped — **End Stream** available |
-| `ended` | complete (seen only for broadcasts ended outside the add-on) |
+| `No broadcast` | nothing selected |
+| `No stream key` | the broadcast has no stream key — fix it in the web UI |
+| `Waiting for encoder` | scheduled; OBS is not sending |
+| `Ready to go live` | YouTube is receiving the encoder — **Go Live** available |
+| `Starting` / `Ending` | transition in progress |
+| `Live` | on air |
+| `Stream stopping` | OBS stopped; YouTube has not registered it yet |
+| `Ready to end` | stream stopped — **End Stream** available |
+| `Ended` | complete (seen only for broadcasts ended outside the add-on) |
 
 ### Web UI
 
@@ -100,9 +100,9 @@ Each device is named after its key in Studio (renaming the key renames the devic
 | Stage | sensor (enum) | see table above |
 | Scheduled start | sensor (timestamp) | Home Assistant renders it relatively (*in 20 minutes*) |
 | Thumbnail | image | unavailable while the broadcast has none |
-| Live | binary sensor (running) | on for `live`, `stream_stopping`, `ready_to_end` — for ON AIR lights and notifications |
+| Live | binary sensor (running) | on for `Live`, `Stream stopping`, `Ready to end` — for ON AIR lights and notifications |
 | Encoder connected | binary sensor (connectivity) | on while YouTube is receiving on **this key** — truthful even with nothing selected |
-| Go Live / End Stream | buttons | available only in `ready_to_go_live` / `ready_to_end` |
+| Go Live / End Stream | buttons | available only in `Ready to go live` / `Ready to end` |
 | Delete | button | removes the selected broadcast from YouTube; unavailable while it is live or transitioning |
 | Broadcast status | sensor (diagnostic) | the selected broadcast's raw lifecycle |
 | Stream health | sensor (diagnostic) | the key's ingestion state/health, selection or not |
@@ -132,7 +132,7 @@ All devices appear under **Settings → Devices & services → MQTT**, the strea
 Commands act on the state shown in Home Assistant — YouTube itself refuses a transition that is no longer valid — and every write is read back before Home Assistant is updated. State is retained on MQTT, commands are not, and replayed commands are ignored, so restarts never start or stop a stream. While a change is in flight to YouTube, every input on **the device it touches** is unavailable and comes back together once the readback lands; other stream keys' devices keep working, so one hall's Go Live never locks out another's. Writes themselves still run strictly one at a time through a single queue. The sensors keep reporting throughout.
 
 - Broadcasts are written with `enableAutoStart` and `enableAutoStop` **false**: OBS starting or stopping never transitions a broadcast; only the buttons do.
-- **Go Live** requires YouTube to report the stream `active`. **End Stream** requires the stream to have stopped, which YouTube reports up to a minute after OBS stops — the `stream_stopping` stage.
+- **Go Live** requires YouTube to report the stream `active`. **End Stream** requires the stream to have stopped, which YouTube reports up to a minute after OBS stops — the `Stream stopping` stage.
 - Both gates are re-checked at the moment a button is pressed.
 - Editing a broadcast preserves the settings the add-on does not manage (DVR, latency, embedding, captions).
 
@@ -181,8 +181,8 @@ Each option is described on the add-on's Configuration tab.
 | Google's chooser does not list the channel | the account is not a Brand Account manager of it |
 | Broadcast select is empty although a stream is scheduled | the broadcast is bound to a different key (check its device), the wrong channel is connected (check **Channel**), the broadcast has no custom stream key (web UI shows it), or it is under *Never started* in the web UI |
 | A stream key has no device | it is YouTube's auto-generated default key; create a named key in Studio and bind broadcasts to it |
-| Go Live unavailable | read **Stage**: `waiting_for_encoder` — OBS not sending; `no_stream_key` — fix in the web UI |
-| End Stream unavailable after stopping OBS | `stream_stopping` for up to a minute; a tap on End Stream arms fast polling |
+| Go Live unavailable | read **Stage**: `Waiting for encoder` — OBS not sending; `No stream key` — fix in the web UI |
+| End Stream unavailable after stopping OBS | `Stream stopping` for up to a minute; a tap on End Stream arms fast polling |
 | Schedule greyed | no preset, preset without stream key, or a start in the past |
 | Start entity missing | Home Assistant older than 2026.5 |
 | `quotaExceeded` in the log | daily quota spent; resets midnight Pacific; raise the poll intervals |

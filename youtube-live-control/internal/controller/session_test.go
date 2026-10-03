@@ -66,10 +66,10 @@ func TestStage(t *testing.T) {
 
 func TestGatesFollowStage(t *testing.T) {
 	if g := computeGates(true, stageReadyToGoLive); !g.goLive || g.end {
-		t.Fatalf("ready_to_go_live gates = %+v", g)
+		t.Fatalf("stageReadyToGoLive gates = %+v", g)
 	}
 	if g := computeGates(true, stageReadyToEnd); g.goLive || !g.end {
-		t.Fatalf("ready_to_end gates = %+v", g)
+		t.Fatalf("stageReadyToEnd gates = %+v", g)
 	}
 	for _, s := range []string{stageLive, stageStreamStopping, stageStarting, stageEnding, stageWaitingForEncoder, stageNoStreamKey, stageNoBroadcast, stageEnded} {
 		if g := computeGates(true, s); g.goLive || g.end {

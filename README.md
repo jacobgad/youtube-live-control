@@ -32,7 +32,7 @@ Prefix `ylc/`. State retained, commands not.
 | `auth/state`, `channel/state` | `authorized`/`unauthorized`; connected channel |
 | `broadcast/{state,set,attributes}` | Broadcast select; attributes `id`, `scheduled_start`, `privacy`, `lifecycle`, `thumbnail_url`, `watch_url` |
 | `title/{state,set}`, `privacy/{state,set}` | written to YouTube on change |
-| `stage/state` | `no_broadcast` `no_stream_key` `waiting_for_encoder` `ready_to_go_live` `starting` `live` `stream_stopping` `ready_to_end` `ending` `ended` |
+| `stage/state` | `No broadcast` `No stream key` `Waiting for encoder` `Ready to go live` `Starting` `Live` `Stream stopping` `Ready to end` `Ending` `Ended` |
 | `scheduled_start/state` | RFC 3339, or `None` |
 | `thumbnail/{url,availability}` | image entity |
 | `live/state`, `encoder/state` | `ON`/`OFF` |

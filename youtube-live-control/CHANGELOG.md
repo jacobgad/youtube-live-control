@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.1.0
+
+**Breaking: Stage sensor states are now sentence case** — `Ready to go live`, `Stream stopping`, `Ended`, … instead of `ready_to_go_live`, `stream_stopping`, `ended`. Automations matching the old snake_case values need updating; the **Live** binary sensor — the recommended automation hook — is unchanged. A retained old-format state may log one "not a valid option" warning in Home Assistant until the add-on publishes fresh state at startup.
+
 ## 2.0.1
 
 - Fix: pressing **Go Live** (or End Stream/Delete) could clear the Broadcast select and refuse the command. Buttons re-verified against a fresh YouTube read before acting, and a read whose bound stream came back different — or empty — was treated as a rebind, moving the broadcast off its device and wiping the selection. Buttons now act on the same polled state their availability was computed from; YouTube itself refuses a transition that is no longer valid, and every write is still read back before Home Assistant updates.

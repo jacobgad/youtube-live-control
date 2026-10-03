@@ -139,8 +139,8 @@ var Subscriptions = []string{
 
 // StageOptions are the Stage sensor's enum states.
 var StageOptions = []string{
-	"no_broadcast", "no_stream_key", "waiting_for_encoder", "ready_to_go_live",
-	"starting", "live", "stream_stopping", "ready_to_end", "ending", "ended",
+	"No broadcast", "No stream key", "Waiting for encoder", "Ready to go live",
+	"Starting", "Live", "Stream stopping", "Ready to end", "Ending", "Ended",
 }
 
 // HADiscoveryTopic builds homeassistant/<component>/<node>/<object>/config.
